@@ -22,14 +22,25 @@ public class FloatingLineService extends Service {
     private WindowManager windowManager;
 
     private LineView lineView;
-    private TextView floatingButton;
+
+    private TextView pointButton;
+    private TextView adjustButton;
+    private TextView hideButton;
     private TextView coordinateLabel;
 
     private WindowManager.LayoutParams lineParams;
-    private WindowManager.LayoutParams buttonParams;
+    private WindowManager.LayoutParams pointParams;
+    private WindowManager.LayoutParams adjustParams;
+    private WindowManager.LayoutParams hideParams;
     private WindowManager.LayoutParams coordinateParams;
 
-    private boolean editing = false;
+    private static final int MODE_IDLE = 0;
+    private static final int MODE_POINT = 1;
+    private static final int MODE_ADJUST = 2;
+
+    private int mode = MODE_IDLE;
+
+    private boolean lineVisible = true;
 
     @Override
     public void onCreate() {
@@ -95,7 +106,22 @@ public class FloatingLineService extends Service {
                 );
 
         params.gravity = gravity;
+
         return params;
+    }
+
+    private TextView createButton(String text) {
+
+        TextView button = new TextView(this);
+
+        button.setText(text);
+        button.setTextColor(Color.WHITE);
+        button.setTextSize(15);
+        button.setGravity(Gravity.CENTER);
+        button.setPadding(16, 12, 16, 12);
+        button.setBackgroundColor(Color.rgb(30, 30, 30));
+
+        return button;
     }
 
     private void createOverlay() {
@@ -109,17 +135,11 @@ public class FloatingLineService extends Service {
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
         );
 
         windowManager.addView(lineView, lineParams);
 
-        coordinateLabel = new TextView(this);
-        coordinateLabel.setText("X: --   Y: --");
-        coordinateLabel.setTextColor(Color.WHITE);
-        coordinateLabel.setTextSize(14);
-        coordinateLabel.setPadding(14, 10, 14, 10);
-        coordinateLabel.setBackgroundColor(Color.rgb(35, 35, 35));
+        coordinateLabel = createButton("X: --   Y: --");
 
         coordinateParams = createParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -130,126 +150,126 @@ public class FloatingLineService extends Service {
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
         );
 
-        coordinateParams.x = 20;
-        coordinateParams.y = 100;
+        coordinateParams.x = 15;
+        coordinateParams.y = 90;
 
         windowManager.addView(
                 coordinateLabel,
                 coordinateParams
         );
 
-        floatingButton = new TextView(this);
-        floatingButton.setText("✎");
-        floatingButton.setTextSize(25);
-        floatingButton.setTextColor(Color.WHITE);
-        floatingButton.setGravity(Gravity.CENTER);
-        floatingButton.setBackgroundColor(Color.rgb(35, 35, 35));
-        floatingButton.setPadding(18, 12, 18, 12);
+        pointButton = createButton("PUNTO");
 
-        buttonParams = createParams(
+        pointParams = createParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP | Gravity.END,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
         );
 
-        buttonParams.x = 25;
-        buttonParams.y = 250;
+        pointParams.x = 20;
+        pointParams.y = 180;
 
-        floatingButton.setOnTouchListener(
-                new View.OnTouchListener() {
+        pointButton.setOnClickListener(v -> activatePointMode());
 
-            private float downX;
-            private float downY;
-            private int startX;
-            private int startY;
-            private boolean moved;
+        windowManager.addView(pointButton, pointParams);
 
-            @Override
-            public boolean onTouch(View view, MotionEvent event) {
+        adjustButton = createButton("AJUSTAR");
 
-                if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                    downX = event.getRawX();
-                    downY = event.getRawY();
-
-                    startX = buttonParams.x;
-                    startY = buttonParams.y;
-
-                    moved = false;
-                    return true;
-                }
-
-                if (event.getAction() == MotionEvent.ACTION_MOVE) {
-
-                    float dx = downX - event.getRawX();
-                    float dy = event.getRawY() - downY;
-
-                    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
-                        moved = true;
-                    }
-
-                    buttonParams.x = startX + (int) dx;
-                    buttonParams.y = startY + (int) dy;
-
-                    windowManager.updateViewLayout(
-                            floatingButton,
-                            buttonParams
-                    );
-
-                    return true;
-                }
-
-                if (event.getAction() == MotionEvent.ACTION_UP) {
-
-                    if (!moved) {
-                        toggleEditing();
-                    }
-
-                    return true;
-                }
-
-                return true;
-            }
-        });
-
-        windowManager.addView(
-                floatingButton,
-                buttonParams
+        adjustParams = createParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.END,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         );
+
+        adjustParams.x = 20;
+        adjustParams.y = 240;
+
+        adjustButton.setOnClickListener(v -> activateAdjustMode());
+
+        windowManager.addView(adjustButton, adjustParams);
+
+        hideButton = createButton("OCULTAR");
+
+        hideParams = createParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.END,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        );
+
+        hideParams.x = 20;
+        hideParams.y = 300;
+
+        hideButton.setOnClickListener(v -> toggleLineVisibility());
+
+        windowManager.addView(hideButton, hideParams);
     }
 
-    private void toggleEditing() {
+    private void activatePointMode() {
 
-        editing = !editing;
+        mode = MODE_POINT;
 
-        if (editing) {
+        lineView.setTouchMode(MODE_POINT);
 
-            lineView.beginPointSelection();
-
-            lineParams.flags =
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
-
-            floatingButton.setText("✓");
-
-            coordinateLabel.setText(
-                    "TOCA EL CENTRO DE LA BOLA BLANCA"
-            );
-
-        } else {
-
-            lineParams.flags =
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                            | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
-
-            floatingButton.setText("✎");
-        }
+        lineParams.flags =
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
 
         windowManager.updateViewLayout(lineView, lineParams);
+
+        pointButton.setText("TOCA LA BOLA");
+        adjustButton.setText("AJUSTAR");
+    }
+
+    private void activateAdjustMode() {
+
+        mode = MODE_ADJUST;
+
+        lineView.setTouchMode(MODE_ADJUST);
+
+        lineParams.flags =
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
+
+        windowManager.updateViewLayout(lineView, lineParams);
+
+        pointButton.setText("PUNTO");
+        adjustButton.setText("ARRASTRA EXTREMO");
+    }
+
+    private void deactivateTouch() {
+
+        mode = MODE_IDLE;
+
+        lineView.setTouchMode(MODE_IDLE);
+
+        lineParams.flags =
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
+
+        windowManager.updateViewLayout(lineView, lineParams);
+
+        pointButton.setText("PUNTO");
+        adjustButton.setText("AJUSTAR");
+    }
+
+    private void toggleLineVisibility() {
+
+        lineVisible = !lineVisible;
+
+        lineView.setLineVisible(lineVisible);
+
+        hideButton.setText(
+                lineVisible ? "OCULTAR" : "MOSTRAR"
+        );
+
+        if (!lineVisible) {
+            deactivateTouch();
+        }
+
         lineView.invalidate();
     }
 
@@ -257,7 +277,7 @@ public class FloatingLineService extends Service {
 
         coordinateLabel.setText(
                 "X: " + Math.round(x)
-                        + "    Y: " + Math.round(y)
+                        + "   Y: " + Math.round(y)
         );
     }
 
@@ -275,23 +295,21 @@ public class FloatingLineService extends Service {
 
         if (windowManager != null) {
 
-            if (lineView != null
-                    && lineView.isAttachedToWindow()) {
-                windowManager.removeView(lineView);
-            }
-
-            if (floatingButton != null
-                    && floatingButton.isAttachedToWindow()) {
-                windowManager.removeView(floatingButton);
-            }
-
-            if (coordinateLabel != null
-                    && coordinateLabel.isAttachedToWindow()) {
-                windowManager.removeView(coordinateLabel);
-            }
+            removeView(lineView);
+            removeView(pointButton);
+            removeView(adjustButton);
+            removeView(hideButton);
+            removeView(coordinateLabel);
         }
 
         super.onDestroy();
+    }
+
+    private void removeView(View view) {
+
+        if (view != null && view.isAttachedToWindow()) {
+            windowManager.removeView(view);
+        }
     }
 
     @Override
@@ -307,16 +325,16 @@ public class FloatingLineService extends Service {
         private final Paint pointPaint =
                 new Paint(Paint.ANTI_ALIAS_FLAG);
 
-        private float startX;
-        private float startY;
+        private float startX = 200;
+        private float startY = 400;
 
-        private float endX;
-        private float endY;
+        private float endX = 450;
+        private float endY = 400;
 
         private boolean pointSelected = false;
-        private boolean selectingOrigin = true;
-        private boolean settingOrigin = false;
-        private boolean draggingEnd = false;
+        private boolean visible = true;
+
+        private int touchMode = MODE_IDLE;
 
         LineView() {
             super(FloatingLineService.this);
@@ -331,17 +349,21 @@ public class FloatingLineService extends Service {
             setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         }
 
-        void beginPointSelection() {
-            selectingOrigin = true;
-            settingOrigin = false;
-            draggingEnd = false;
+        void setTouchMode(int newMode) {
+            touchMode = newMode;
+        }
+
+        void setLineVisible(boolean value) {
+            visible = value;
+            invalidate();
         }
 
         @Override
         protected void onDraw(Canvas canvas) {
+
             super.onDraw(canvas);
 
-            if (!pointSelected) {
+            if (!visible || !pointSelected) {
                 return;
             }
 
@@ -353,38 +375,36 @@ public class FloatingLineService extends Service {
                     linePaint
             );
 
-            if (editing) {
-                canvas.drawCircle(
-                        startX,
-                        startY,
-                        10,
-                        pointPaint
-                );
+            canvas.drawCircle(
+                    startX,
+                    startY,
+                    9,
+                    pointPaint
+            );
 
-                canvas.drawCircle(
-                        endX,
-                        endY,
-                        10,
-                        pointPaint
-                );
-            }
+            canvas.drawCircle(
+                    endX,
+                    endY,
+                    9,
+                    pointPaint
+            );
         }
 
         @Override
         public boolean onTouchEvent(MotionEvent event) {
 
-            if (!editing) {
+            if (touchMode == MODE_IDLE) {
                 return false;
             }
 
-            float x = event.getRawX();
-            float y = event.getRawY();
+            float x = event.getX();
+            float y = event.getY();
 
             switch (event.getAction()) {
 
                 case MotionEvent.ACTION_DOWN:
 
-                    if (selectingOrigin || !pointSelected) {
+                    if (touchMode == MODE_POINT) {
 
                         startX = x;
                         startY = y;
@@ -393,41 +413,41 @@ public class FloatingLineService extends Service {
                         endY = y;
 
                         pointSelected = true;
-                        selectingOrigin = false;
-                        settingOrigin = true;
 
                         updateCoordinates(startX, startY);
+
                         invalidate();
 
                         return true;
                     }
 
-                    endX = x;
-                    endY = y;
+                    if (touchMode == MODE_ADJUST
+                            && pointSelected) {
 
-                    draggingEnd = true;
-                    invalidate();
+                        endX = x;
+                        endY = y;
+
+                        invalidate();
+
+                        return true;
+                    }
 
                     return true;
 
                 case MotionEvent.ACTION_MOVE:
 
-                    if (settingOrigin) {
-                        return true;
-                    }
+                    if (touchMode == MODE_ADJUST
+                            && pointSelected) {
 
-                    if (draggingEnd) {
                         endX = x;
                         endY = y;
+
                         invalidate();
                     }
 
                     return true;
 
                 case MotionEvent.ACTION_UP:
-
-                    settingOrigin = false;
-                    draggingEnd = false;
 
                     return true;
             }
