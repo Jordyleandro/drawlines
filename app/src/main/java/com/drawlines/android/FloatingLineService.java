@@ -38,10 +38,6 @@ public class FloatingLineService extends Service {
     private static final int MODE_POINT = 1;
     private static final int MODE_ADJUST = 2;
 
-    private int mode = MODE_IDLE;
-
-    private boolean lineVisible = true;
-
     @Override
     public void onCreate() {
         super.onCreate();
@@ -55,11 +51,9 @@ public class FloatingLineService extends Service {
     }
 
     private void createNotification() {
-
         String channelId = "drawlines_channel";
 
         if (Build.VERSION.SDK_INT >= 26) {
-
             NotificationChannel channel =
                     new NotificationChannel(
                             channelId,
@@ -67,10 +61,8 @@ public class FloatingLineService extends Service {
                             NotificationManager.IMPORTANCE_LOW
                     );
 
-            NotificationManager manager =
-                    getSystemService(NotificationManager.class);
-
-            manager.createNotificationChannel(channel);
+            getSystemService(NotificationManager.class)
+                    .createNotificationChannel(channel);
         }
 
         Notification.Builder builder;
@@ -83,7 +75,7 @@ public class FloatingLineService extends Service {
 
         Notification notification = builder
                 .setContentTitle("DrawLines activo")
-                .setContentText("Selector de coordenadas disponible")
+                .setContentText("Línea con rebotes")
                 .setSmallIcon(android.R.drawable.ic_menu_edit)
                 .build();
 
@@ -91,10 +83,7 @@ public class FloatingLineService extends Service {
     }
 
     private WindowManager.LayoutParams createParams(
-            int width,
-            int height,
-            int gravity,
-            int flags) {
+            int width, int height, int gravity, int flags) {
 
         WindowManager.LayoutParams params =
                 new WindowManager.LayoutParams(
@@ -106,12 +95,10 @@ public class FloatingLineService extends Service {
                 );
 
         params.gravity = gravity;
-
         return params;
     }
 
     private TextView createButton(String text) {
-
         TextView button = new TextView(this);
 
         button.setText(text);
@@ -154,8 +141,7 @@ public class FloatingLineService extends Service {
         coordinateParams.y = 90;
 
         windowManager.addView(
-                coordinateLabel,
-                coordinateParams
+                coordinateLabel, coordinateParams
         );
 
         pointButton = createButton("PUNTO");
@@ -170,7 +156,9 @@ public class FloatingLineService extends Service {
         pointParams.x = 20;
         pointParams.y = 180;
 
-        pointButton.setOnClickListener(v -> activatePointMode());
+        pointButton.setOnClickListener(
+                v -> activatePointMode()
+        );
 
         windowManager.addView(pointButton, pointParams);
 
@@ -186,7 +174,9 @@ public class FloatingLineService extends Service {
         adjustParams.x = 20;
         adjustParams.y = 240;
 
-        adjustButton.setOnClickListener(v -> activateAdjustMode());
+        adjustButton.setOnClickListener(
+                v -> activateAdjustMode()
+        );
 
         windowManager.addView(adjustButton, adjustParams);
 
@@ -202,47 +192,22 @@ public class FloatingLineService extends Service {
         hideParams.x = 20;
         hideParams.y = 300;
 
-        hideButton.setOnClickListener(v -> toggleLineVisibility());
+        hideButton.setOnClickListener(
+                v -> toggleVisibility()
+        );
 
         windowManager.addView(hideButton, hideParams);
     }
 
-    private void activatePointMode() {
-
-        mode = MODE_POINT;
-
-        lineView.setTouchMode(MODE_POINT);
-
+    private void enableLineTouch() {
         lineParams.flags =
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
 
         windowManager.updateViewLayout(lineView, lineParams);
-
-        pointButton.setText("TOCA LA BOLA");
-        adjustButton.setText("AJUSTAR");
     }
 
-    private void activateAdjustMode() {
-
-        mode = MODE_ADJUST;
-
-        lineView.setTouchMode(MODE_ADJUST);
-
-        lineParams.flags =
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
-
-        windowManager.updateViewLayout(lineView, lineParams);
-
-        pointButton.setText("PUNTO");
-        adjustButton.setText("ARRASTRA EXTREMO");
-    }
-
-    private void deactivateTouch() {
-
-        mode = MODE_IDLE;
-
+    private void disableLineTouch() {
         lineView.setTouchMode(MODE_IDLE);
 
         lineParams.flags =
@@ -256,25 +221,37 @@ public class FloatingLineService extends Service {
         adjustButton.setText("AJUSTAR");
     }
 
-    private void toggleLineVisibility() {
+    private void activatePointMode() {
+        lineView.setTouchMode(MODE_POINT);
+        enableLineTouch();
 
-        lineVisible = !lineVisible;
+        pointButton.setText("TOCA LA BOLA");
+        adjustButton.setText("AJUSTAR");
+    }
 
-        lineView.setLineVisible(lineVisible);
+    private void activateAdjustMode() {
+        lineView.setTouchMode(MODE_ADJUST);
+        enableLineTouch();
+
+        pointButton.setText("PUNTO");
+        adjustButton.setText("AJUSTANDO");
+    }
+
+    private void toggleVisibility() {
+        boolean visible = !lineView.isVisible();
+
+        lineView.setVisible(visible);
 
         hideButton.setText(
-                lineVisible ? "OCULTAR" : "MOSTRAR"
+                visible ? "OCULTAR" : "MOSTRAR"
         );
 
-        if (!lineVisible) {
-            deactivateTouch();
+        if (!visible) {
+            disableLineTouch();
         }
-
-        lineView.invalidate();
     }
 
     private void updateCoordinates(float x, float y) {
-
         coordinateLabel.setText(
                 "X: " + Math.round(x)
                         + "   Y: " + Math.round(y)
@@ -283,18 +260,13 @@ public class FloatingLineService extends Service {
 
     @Override
     public int onStartCommand(
-            Intent intent,
-            int flags,
-            int startId) {
-
+            Intent intent, int flags, int startId) {
         return START_NOT_STICKY;
     }
 
     @Override
     public void onDestroy() {
-
         if (windowManager != null) {
-
             removeView(lineView);
             removeView(pointButton);
             removeView(adjustButton);
@@ -306,7 +278,6 @@ public class FloatingLineService extends Service {
     }
 
     private void removeView(View view) {
-
         if (view != null && view.isAttachedToWindow()) {
             windowManager.removeView(view);
         }
@@ -325,11 +296,11 @@ public class FloatingLineService extends Service {
         private final Paint pointPaint =
                 new Paint(Paint.ANTI_ALIAS_FLAG);
 
-        private float startX = 200;
-        private float startY = 400;
+        private float startX = 600;
+        private float startY = 450;
 
-        private float endX = 450;
-        private float endY = 400;
+        private float endX = 850;
+        private float endY = 450;
 
         private boolean pointSelected = false;
         private boolean visible = true;
@@ -349,45 +320,130 @@ public class FloatingLineService extends Service {
             setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         }
 
-        void setTouchMode(int newMode) {
-            touchMode = newMode;
+        void setTouchMode(int mode) {
+            touchMode = mode;
         }
 
-        void setLineVisible(boolean value) {
+        boolean isVisible() {
+            return visible;
+        }
+
+        void setVisible(boolean value) {
             visible = value;
             invalidate();
         }
 
         @Override
         protected void onDraw(Canvas canvas) {
-
             super.onDraw(canvas);
 
             if (!visible || !pointSelected) {
                 return;
             }
 
-            canvas.drawLine(
-                    startX,
-                    startY,
-                    endX,
-                    endY,
-                    linePaint
+            drawReflections(canvas);
+
+            // Punto de origen: permanece fijo.
+            canvas.drawCircle(
+                    startX, startY, 10, pointPaint
             );
 
+            // Punto de ajuste: cambia la dirección.
             canvas.drawCircle(
-                    startX,
-                    startY,
-                    9,
-                    pointPaint
+                    endX, endY, 9, pointPaint
             );
+        }
 
-            canvas.drawCircle(
-                    endX,
-                    endY,
-                    9,
-                    pointPaint
-            );
+        private void drawReflections(Canvas canvas) {
+
+            float width = getWidth();
+            float height = getHeight();
+
+            if (width <= 0 || height <= 0) {
+                return;
+            }
+
+            // Superficie de juego aproximada según tu captura.
+            float left = width * 0.195f;
+            float right = width * 0.805f;
+            float top = height * 0.236f;
+            float bottom = height * 0.916f;
+
+            // Dirección desde el punto fijo hacia el extremo.
+            float dx = endX - startX;
+            float dy = endY - startY;
+
+            float length = (float) Math.hypot(dx, dy);
+
+            if (length < 1f) {
+                return;
+            }
+
+            dx /= length;
+            dy /= length;
+
+            float x = startX;
+            float y = startY;
+
+            // Dibujar hasta 8 tramos, incluyendo varios rebotes.
+            for (int i = 0; i < 8; i++) {
+
+                float tx = Float.POSITIVE_INFINITY;
+                float ty = Float.POSITIVE_INFINITY;
+
+                if (dx > 0.00001f) {
+                    tx = (right - x) / dx;
+                } else if (dx < -0.00001f) {
+                    tx = (left - x) / dx;
+                }
+
+                if (dy > 0.00001f) {
+                    ty = (bottom - y) / dy;
+                } else if (dy < -0.00001f) {
+                    ty = (top - y) / dy;
+                }
+
+                float distance = Math.min(tx, ty);
+
+                if (!Float.isFinite(distance) || distance <= 0) {
+                    break;
+                }
+
+                float nextX = x + dx * distance;
+                float nextY = y + dy * distance;
+
+                canvas.drawLine(
+                        x, y, nextX, nextY, linePaint
+                );
+
+                boolean hitLeftOrRight =
+                        Math.abs(tx - distance) < 0.01f;
+
+                boolean hitTopOrBottom =
+                        Math.abs(ty - distance) < 0.01f;
+
+                x = nextX;
+                y = nextY;
+
+                // Rebote en banda vertical.
+                if (hitLeftOrRight) {
+                    dx = -dx;
+                }
+
+                // Rebote en banda horizontal.
+                if (hitTopOrBottom) {
+                    dy = -dy;
+                }
+
+                // Evitar errores numéricos en el siguiente tramo.
+                if (hitLeftOrRight) {
+                    x += dx * 0.1f;
+                }
+
+                if (hitTopOrBottom) {
+                    y += dy * 0.1f;
+                }
+            }
         }
 
         @Override
@@ -406,6 +462,7 @@ public class FloatingLineService extends Service {
 
                     if (touchMode == MODE_POINT) {
 
+                        // Solo PUNTO puede cambiar el origen.
                         startX = x;
                         startY = y;
 
@@ -415,7 +472,6 @@ public class FloatingLineService extends Service {
                         pointSelected = true;
 
                         updateCoordinates(startX, startY);
-
                         invalidate();
 
                         return true;
@@ -424,11 +480,11 @@ public class FloatingLineService extends Service {
                     if (touchMode == MODE_ADJUST
                             && pointSelected) {
 
+                        // AJUSTAR nunca modifica el origen.
                         endX = x;
                         endY = y;
 
                         invalidate();
-
                         return true;
                     }
 
@@ -439,6 +495,7 @@ public class FloatingLineService extends Service {
                     if (touchMode == MODE_ADJUST
                             && pointSelected) {
 
+                        // Solo se mueve el extremo.
                         endX = x;
                         endY = y;
 
@@ -448,7 +505,6 @@ public class FloatingLineService extends Service {
                     return true;
 
                 case MotionEvent.ACTION_UP:
-
                     return true;
             }
 
