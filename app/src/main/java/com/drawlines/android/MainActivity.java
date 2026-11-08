@@ -1,9 +1,7 @@
 package com.drawlines.android;
 
 import android.app.Activity;
-import android.content.Context;
 import android.content.Intent;
-import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -16,16 +14,10 @@ import android.widget.TextView;
 public class MainActivity extends Activity {
 
     private static final int REQUEST_OVERLAY = 100;
-    private static final int REQUEST_CAPTURE = 101;
-
-    private MediaProjectionManager projectionManager;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        projectionManager = (MediaProjectionManager)
-                getSystemService(Context.MEDIA_PROJECTION_SERVICE);
 
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -39,14 +31,14 @@ public class MainActivity extends Activity {
 
         TextView description = new TextView(this);
         description.setText(
-                "Línea automática sobre la bola blanca"
+                "Selecciona un punto y dibuja tu línea"
         );
         description.setTextSize(16);
         description.setGravity(Gravity.CENTER);
 
         Button start = new Button(this);
-        start.setText("ACTIVAR DRAWLINES");
-        start.setOnClickListener(v -> activate());
+        start.setText("ACTIVAR LÁPIZ FLOTANTE");
+        start.setOnClickListener(v -> activateOverlay());
 
         layout.addView(title);
         layout.addView(description);
@@ -55,9 +47,10 @@ public class MainActivity extends Activity {
         setContentView(layout);
     }
 
-    private void activate() {
+    private void activateOverlay() {
 
         if (!Settings.canDrawOverlays(this)) {
+
             Intent intent = new Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:" + getPackageName())
@@ -67,10 +60,23 @@ public class MainActivity extends Activity {
             return;
         }
 
-        Intent captureIntent =
-                projectionManager.createScreenCaptureIntent();
+        startFloatingService();
+    }
 
-        startActivityForResult(captureIntent, REQUEST_CAPTURE);
+    private void startFloatingService() {
+
+        Intent service = new Intent(
+                this,
+                FloatingLineService.class
+        );
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(service);
+        } else {
+            startService(service);
+        }
+
+        finish();
     }
 
     @Override
@@ -81,32 +87,9 @@ public class MainActivity extends Activity {
 
         super.onActivityResult(requestCode, resultCode, data);
 
-        if (requestCode == REQUEST_OVERLAY) {
-            if (Settings.canDrawOverlays(this)) {
-                activate();
-            }
-            return;
-        }
-
-        if (requestCode == REQUEST_CAPTURE
-                && resultCode == RESULT_OK
-                && data != null) {
-
-            Intent service = new Intent(
-                    this,
-                    FloatingLineService.class
-            );
-
-            service.putExtra("resultCode", resultCode);
-            service.putExtra("projectionData", data);
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(service);
-            } else {
-                startService(service);
-            }
-
-            finish();
+        if (requestCode == REQUEST_OVERLAY
+                && Settings.canDrawOverlays(this)) {
+            startFloatingService();
         }
     }
 }
