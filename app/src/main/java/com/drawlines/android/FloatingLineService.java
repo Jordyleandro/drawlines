@@ -709,4 +709,44 @@ public class FloatingLineService extends Service {
                         return true;
                     }
 
-              
+                    if (touchMode == MODE_ADJUST && pointSelected) {
+
+                        endX = x;
+                        endY = y;
+
+                        invalidate();
+                        return true;
+                    }
+
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+
+                    if (touchMode == MODE_ADJUST && pointSelected) {
+
+                        endX = x;
+                        endY = y;
+
+                        invalidate();
+                    }
+
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+
+                    if (touchMode == MODE_ADJUST) {
+                        post(() -> disableLineTouch());
+                    }
+
+                    return true;
+
+                case MotionEvent.ACTION_CANCEL:
+
+                    post(() -> disableLineTouch());
+                    return true;
+            }
+
+            return true;
+        }
+    }
+}
