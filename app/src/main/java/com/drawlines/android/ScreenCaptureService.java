@@ -24,6 +24,9 @@ import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.WindowManager;
 
+import java.util.List;
+import java.util.ArrayList;
+
 public class ScreenCaptureService extends Service {
 
     public static final String EXTRA_RESULT_CODE = "result_code";
@@ -33,6 +36,18 @@ public class ScreenCaptureService extends Service {
             "com.drawlines.android.DIRECTION_DETECTED";
 
     public static final String EXTRA_ANGLE = "detected_angle";
+
+    // Nuevo: resultados de detección de bolas.
+    public static final String ACTION_BALLS =
+            "com.drawlines.android.BALLS_DETECTED";
+
+    public static final String EXTRA_BALL_XS = "ball_positions_x";
+    public static final String EXTRA_BALL_YS = "ball_positions_y";
+    public static final String EXTRA_BALL_RADII = "ball_radii";
+
+    // Las posiciones de las bolas se envían normalizadas
+    // entre 0 y 1 respecto de la captura.
+    public static final String EXTRA_BALL_COUNT = "ball_count";
 
     private static final int NOTIFICATION_ID = 92;
     private static final String CHANNEL_ID = "drawlines_capture";
@@ -269,12 +284,35 @@ public class ScreenCaptureService extends Service {
                 return;
             }
 
+            long now = System.currentTimeMillis();
+
+            if (now - lastDetectionTime < 100) {
+                return;
+            }
+
+            lastDetectionTime = now;
+
             SharedPreferences preferences =
                     getSharedPreferences(
                             PREFS_NAME,
                             MODE_PRIVATE
                     );
 
+            int imageWidth = image.getWidth();
+            int imageHeight = image.getHeight();
+
+            if (imageWidth <= 0 || imageHeight <= 0) {
+                return;
+            }
+
+            // 1. Detectar las bolas en cada captura.
+            detectAndBroadcastBalls(
+                    image,
+                    imageWidth,
+                    imageHeight
+            );
+
+            // 2. Mantener la detección de dirección original.
             boolean trackingEnabled = preferences.getBoolean(
                     PREF_TRACKING,
                     false
@@ -283,14 +321,6 @@ public class ScreenCaptureService extends Service {
             if (!trackingEnabled) {
                 return;
             }
-
-            long now = System.currentTimeMillis();
-
-            if (now - lastDetectionTime < 100) {
-                return;
-            }
-
-            lastDetectionTime = now;
 
             boolean selected = preferences.getBoolean(
                     PREF_SELECTED,
@@ -325,13 +355,6 @@ public class ScreenCaptureService extends Service {
                     || savedY < 0
                     || savedWidth <= 0
                     || savedHeight <= 0) {
-                return;
-            }
-
-            int imageWidth = image.getWidth();
-            int imageHeight = image.getHeight();
-
-            if (imageWidth <= 0 || imageHeight <= 0) {
                 return;
             }
 
@@ -377,6 +400,61 @@ public class ScreenCaptureService extends Service {
             if (image != null) {
                 image.close();
             }
+        }
+    }
+
+    private void detectAndBroadcastBalls(
+            Image image,
+            int imageWidth,
+            int imageHeight) {
+
+        try {
+
+            List<BallDetector.Ball> balls =
+                    BallDetector.detectBalls(image);
+
+            List<Float> positionsX = new ArrayList<>();
+            List<Float> positionsY = new ArrayList<>();
+            List<Float> radii = new ArrayList<>();
+
+            for (BallDetector.Ball ball : balls) {
+
+                // Normalizar para que las posiciones
+                // puedan adaptarse al tamaño del overlay.
+                positionsX.add(ball.x / imageWidth);
+                positionsY.add(ball.y / imageHeight);
+                radii.add(ball.radius / imageWidth);
+            }
+
+            float[] xs = new float[positionsX.size()];
+            float[] ys = new float[positionsY.size()];
+            float[] rs = new float[radii.size()];
+
+            for (int i = 0; i < positionsX.size(); i++) {
+
+                xs[i] = positionsX.get(i);
+                ys[i] = positionsY.get(i);
+                rs[i] = radii.get(i);
+            }
+
+            Intent result = new Intent(ACTION_BALLS);
+
+            result.setPackage(getPackageName());
+
+            result.putExtra(EXTRA_BALL_XS, xs);
+            result.putExtra(EXTRA_BALL_YS, ys);
+            result.putExtra(EXTRA_BALL_RADII, rs);
+            result.putExtra(EXTRA_BALL_COUNT, balls.size());
+
+            sendBroadcast(result);
+
+        } catch (Exception e) {
+
+            Log.e(
+                    "DrawLines",
+                    "Error detectando bolas",
+                    e
+            );
         }
     }
 
