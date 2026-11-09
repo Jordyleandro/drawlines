@@ -42,6 +42,8 @@ public class ScreenCaptureService extends Service {
     private static final String PREF_Y = "origin_y";
     private static final String PREF_SELECTED = "origin_selected";
     private static final String PREF_TRACKING = "tracking_enabled";
+    private static final String PREF_VIEW_WIDTH = "view_width";
+    private static final String PREF_VIEW_HEIGHT = "view_height";
 
     private MediaProjection mediaProjection;
     private VirtualDisplay virtualDisplay;
@@ -273,8 +275,6 @@ public class ScreenCaptureService extends Service {
                             MODE_PRIVATE
                     );
 
-            // Si el seguimiento está apagado,
-            // no analizar ni enviar nuevas direcciones.
             boolean trackingEnabled = preferences.getBoolean(
                     PREF_TRACKING,
                     false
@@ -284,7 +284,6 @@ public class ScreenCaptureService extends Service {
                 return;
             }
 
-            // Limitar el análisis a una vez cada 100 ms.
             long now = System.currentTimeMillis();
 
             if (now - lastDetectionTime < 100) {
@@ -302,17 +301,49 @@ public class ScreenCaptureService extends Service {
                 return;
             }
 
-            float originX = preferences.getFloat(
+            float savedX = preferences.getFloat(
                     PREF_X,
                     -1f
             );
 
-            float originY = preferences.getFloat(
+            float savedY = preferences.getFloat(
                     PREF_Y,
                     -1f
             );
 
-            if (originX < 0 || originY < 0) {
+            int savedWidth = preferences.getInt(
+                    PREF_VIEW_WIDTH,
+                    0
+            );
+
+            int savedHeight = preferences.getInt(
+                    PREF_VIEW_HEIGHT,
+                    0
+            );
+
+            if (savedX < 0
+                    || savedY < 0
+                    || savedWidth <= 0
+                    || savedHeight <= 0) {
+                return;
+            }
+
+            int imageWidth = image.getWidth();
+            int imageHeight = image.getHeight();
+
+            if (imageWidth <= 0 || imageHeight <= 0) {
+                return;
+            }
+
+            // Convertir las coordenadas de la ventana
+            // flotante a las dimensiones de la captura.
+            float scaleX = (float) imageWidth / savedWidth;
+            float scaleY = (float) imageHeight / savedHeight;
+
+            float originX = savedX * scaleX;
+            float originY = savedY * scaleY;
+
+            if (originX >= imageWidth || originY >= imageHeight) {
                 return;
             }
 
