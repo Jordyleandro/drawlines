@@ -1,5 +1,6 @@
 package com.drawlines.android;
 
+import android.app.Activity;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -20,6 +21,7 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
 import android.util.DisplayMetrics;
+import android.util.Log;
 import android.view.WindowManager;
 
 public class ScreenCaptureService extends Service {
@@ -39,6 +41,7 @@ public class ScreenCaptureService extends Service {
     private static final String PREF_X = "origin_x";
     private static final String PREF_Y = "origin_y";
     private static final String PREF_SELECTED = "origin_selected";
+    private static final String PREF_TRACKING = "tracking_enabled";
 
     private MediaProjection mediaProjection;
     private VirtualDisplay virtualDisplay;
@@ -48,6 +51,7 @@ public class ScreenCaptureService extends Service {
     private Handler captureHandler;
 
     private boolean captureStarted = false;
+    private boolean projectionStopped = false;
 
     private long lastDetectionTime = 0;
 
@@ -95,7 +99,7 @@ public class ScreenCaptureService extends Service {
 
         return builder
                 .setContentTitle("DrawLines")
-                .setContentText("Seguimiento de dirección activo")
+                .setContentText("Captura de pantalla preparada")
                 .setSmallIcon(android.R.drawable.ic_menu_view)
                 .setOngoing(true)
                 .build();
@@ -107,8 +111,12 @@ public class ScreenCaptureService extends Service {
             int flags,
             int startId) {
 
-        if (intent == null || captureStarted) {
+        if (intent == null) {
             stopSelf();
+            return START_NOT_STICKY;
+        }
+
+        if (captureStarted) {
             return START_NOT_STICKY;
         }
 
@@ -147,7 +155,7 @@ public class ScreenCaptureService extends Service {
             data = intent.getParcelableExtra(EXTRA_DATA);
         }
 
-        if (data == null) {
+        if (resultCode != Activity.RESULT_OK || data == null) {
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -184,6 +192,9 @@ public class ScreenCaptureService extends Service {
 
                         @Override
                         public void onStop() {
+
+                            projectionStopped = true;
+                            mediaProjection = null;
 
                             releaseDisplay();
 
@@ -233,6 +244,12 @@ public class ScreenCaptureService extends Service {
 
         } catch (Exception e) {
 
+            Log.e(
+                    "DrawLines",
+                    "Error iniciando captura",
+                    e
+            );
+
             releaseDisplay();
             stopSelf();
         }
@@ -250,20 +267,31 @@ public class ScreenCaptureService extends Service {
                 return;
             }
 
-            long now = System.currentTimeMillis();
-
-            // Limitar el análisis para no saturar el teléfono.
-            if (now - lastDetectionTime < 100) {
-                return;
-            }
-
-            lastDetectionTime = now;
-
             SharedPreferences preferences =
                     getSharedPreferences(
                             PREFS_NAME,
                             MODE_PRIVATE
                     );
+
+            // Si el seguimiento está apagado,
+            // no analizar ni enviar nuevas direcciones.
+            boolean trackingEnabled = preferences.getBoolean(
+                    PREF_TRACKING,
+                    false
+            );
+
+            if (!trackingEnabled) {
+                return;
+            }
+
+            // Limitar el análisis a una vez cada 100 ms.
+            long now = System.currentTimeMillis();
+
+            if (now - lastDetectionTime < 100) {
+                return;
+            }
+
+            lastDetectionTime = now;
 
             boolean selected = preferences.getBoolean(
                     PREF_SELECTED,
@@ -307,7 +335,7 @@ public class ScreenCaptureService extends Service {
 
         } catch (Exception e) {
 
-            android.util.Log.e(
+            Log.e(
                     "DrawLines",
                     "Error analizando imagen",
                     e
@@ -323,14 +351,19 @@ public class ScreenCaptureService extends Service {
 
     private void releaseDisplay() {
 
-        if (virtualDisplay != null) {
-            virtualDisplay.release();
-            virtualDisplay = null;
+        VirtualDisplay display = virtualDisplay;
+        virtualDisplay = null;
+
+        if (display != null) {
+            display.release();
         }
 
-        if (imageReader != null) {
-            imageReader.close();
-            imageReader = null;
+        ImageReader reader = imageReader;
+        imageReader = null;
+
+        if (reader != null) {
+            reader.setOnImageAvailableListener(null, null);
+            reader.close();
         }
     }
 
@@ -339,11 +372,12 @@ public class ScreenCaptureService extends Service {
 
         releaseDisplay();
 
-        if (mediaProjection != null) {
+        MediaProjection projection = mediaProjection;
+        mediaProjection = null;
 
-            MediaProjection projection = mediaProjection;
-            mediaProjection = null;
+        if (projection != null && !projectionStopped) {
 
+            projectionStopped = true;
             projection.stop();
         }
 
