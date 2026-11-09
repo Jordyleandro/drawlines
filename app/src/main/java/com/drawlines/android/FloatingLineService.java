@@ -661,4 +661,234 @@ public class FloatingLineService extends Service {
 
                 if (Math.abs(dy) < 0.00001f) {
                     if (originY < top || originY > bottom) continue;
-  
+                } else {
+                    float t1 = (top - originY) / dy;
+                    float t2 = (bottom - originY) / dy;
+                    tMin = Math.max(tMin, Math.min(t1, t2));
+                    tMax = Math.min(tMax, Math.max(t1, t2));
+                }
+
+                if (tMin >= tMax) continue;
+
+                newAngles[validCount] = angles[i];
+                validCount++;
+            }
+
+            if (validCount > 0) {
+                detectedAngles = new float[validCount];
+                System.arraycopy(newAngles, 0, detectedAngles, 0, validCount);
+                detectedLineCount = validCount;
+                invalidate();
+            }
+        }
+
+        private void drawDetectedLines(Canvas canvas) {
+
+            float width = getWidth();
+            float height = getHeight();
+
+            float left = width * 0.195f;
+            float right = width * 0.805f;
+            float top = height * 0.236f;
+            float bottom = height * 0.916f;
+
+            for (int i = 0; i < detectedLineCount; i++) {
+
+                double angle = Math.toRadians(detectedAngles[i]);
+
+                float dx = (float) -Math.sin(angle);
+                float dy = (float) Math.cos(angle);
+
+                float x = startX;
+                float y = startY;
+
+                float tMin = Float.NEGATIVE_INFINITY;
+                float tMax = Float.POSITIVE_INFINITY;
+
+                if (Math.abs(dx) > 0.00001f) {
+                    float t1 = (left - x) / dx;
+                    float t2 = (right - x) / dx;
+                    tMin = Math.max(tMin, Math.min(t1, t2));
+                    tMax = Math.min(tMax, Math.max(t1, t2));
+                }
+
+                if (Math.abs(dy) > 0.00001f) {
+                    float t1 = (top - y) / dy;
+                    float t2 = (bottom - y) / dy;
+                    tMin = Math.max(tMin, Math.min(t1, t2));
+                    tMax = Math.min(tMax, Math.max(t1, t2));
+                }
+
+                if (tMin >= tMax) continue;
+
+                canvas.drawLine(
+                        x + dx * tMin,
+                        y + dy * tMin,
+                        x + dx * tMax,
+                        y + dy * tMax,
+                        linePaint
+                );
+            }
+        }
+
+        void updateAutomaticDirection(float angle) {
+            // Se conserva por compatibilidad.
+            // Las dos líneas nuevas se dibujan desde ACTION_LINES.
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+
+            if (!pointSelected) {
+                return;
+            }
+
+            if (detectedLineCount > 0) {
+                drawDetectedLines(canvas);
+            } else {
+                drawReflections(canvas);
+            }
+
+            canvas.drawCircle(startX, startY, 10, pointPaint);
+        }
+
+        private void drawReflections(Canvas canvas) {
+
+            float width = getWidth();
+            float height = getHeight();
+
+            if (width <= 0 || height <= 0) return;
+
+            float left = width * 0.195f;
+            float right = width * 0.805f;
+            float top = height * 0.236f;
+            float bottom = height * 0.916f;
+
+            float dx = endX - startX;
+            float dy = endY - startY;
+
+            float length = (float) Math.hypot(dx, dy);
+
+            if (length < 1f) return;
+
+            dx /= length;
+            dy /= length;
+
+            float x = startX;
+            float y = startY;
+
+            for (int i = 0; i < 8; i++) {
+
+                float tx = Float.POSITIVE_INFINITY;
+                float ty = Float.POSITIVE_INFINITY;
+
+                if (dx > 0.00001f) tx = (right - x) / dx;
+                else if (dx < -0.00001f) tx = (left - x) / dx;
+
+                if (dy > 0.00001f) ty = (bottom - y) / dy;
+                else if (dy < -0.00001f) ty = (top - y) / dy;
+
+                float distance = Math.min(tx, ty);
+
+                if (!Float.isFinite(distance) || distance <= 0) break;
+
+                float nextX = x + dx * distance;
+                float nextY = y + dy * distance;
+
+                canvas.drawLine(x, y, nextX, nextY, linePaint);
+
+                boolean hitX = Math.abs(tx - distance) < 0.01f;
+                boolean hitY = Math.abs(ty - distance) < 0.01f;
+
+                x = nextX;
+                y = nextY;
+
+                if (hitX) dx = -dx;
+                if (hitY) dy = -dy;
+
+                if (hitX) x += dx * 0.1f;
+                if (hitY) y += dy * 0.1f;
+            }
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+
+            if (touchMode == MODE_IDLE) return false;
+
+            float x = event.getX();
+            float y = event.getY();
+
+            switch (event.getAction()) {
+
+                case MotionEvent.ACTION_DOWN:
+
+                    if (touchMode == MODE_POINT) {
+
+                        startX = x;
+                        startY = y;
+
+                        detectedLineCount = 0;
+                        detectedAngles = new float[0];
+
+                        endX = startX + 250f;
+                        endY = startY;
+
+                        pointSelected = true;
+
+                        SharedPreferences preferences =
+                                getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
+                        preferences.edit()
+                                .putFloat(PREF_X, startX)
+                                .putFloat(PREF_Y, startY)
+                                .putInt(PREF_VIEW_WIDTH, getWidth())
+                                .putInt(PREF_VIEW_HEIGHT, getHeight())
+                                .putBoolean(PREF_SELECTED, true)
+                                .apply();
+
+                        updateCoordinates(startX, startY);
+                        invalidate();
+
+                        post(() -> disableLineTouch());
+
+                        return true;
+                    }
+
+                    if (touchMode == MODE_ADJUST && pointSelected) {
+                        endX = x;
+                        endY = y;
+                        invalidate();
+                        return true;
+                    }
+
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+
+                    if (touchMode == MODE_ADJUST && pointSelected) {
+                        endX = x;
+                        endY = y;
+                        invalidate();
+                    }
+
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+
+                    if (touchMode == MODE_ADJUST) {
+                        post(() -> disableLineTouch());
+                    }
+
+                    return true;
+
+                case MotionEvent.ACTION_CANCEL:
+                    post(() -> disableLineTouch());
+                    return true;
+            }
+
+            return true;
+        }
+    }
+}
