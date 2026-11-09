@@ -7,6 +7,7 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
 import android.graphics.PixelFormat;
 import android.hardware.display.DisplayManager;
@@ -33,7 +34,6 @@ public class ScreenCaptureService extends Service {
 
     public static final String ACTION_DIRECTION =
             "com.drawlines.android.DIRECTION_DETECTED";
-
     public static final String EXTRA_ANGLE = "detected_angle";
 
     public static final String ACTION_LINES =
@@ -41,24 +41,17 @@ public class ScreenCaptureService extends Service {
 
     public static final String EXTRA_LINE_ANGLES =
             "detected_line_angles";
-
     public static final String EXTRA_LINE_RHOS =
             "detected_line_rhos";
-
     public static final String EXTRA_LINE_COUNT =
             "detected_line_count";
-
     public static final String EXTRA_IMAGE_WIDTH =
             "detected_image_width";
-
     public static final String EXTRA_IMAGE_HEIGHT =
             "detected_image_height";
 
-    public static final String EXTRA_ORIGIN_X =
-            "detected_origin_x";
-
-    public static final String EXTRA_ORIGIN_Y =
-            "detected_origin_y";
+    public static final String EXTRA_ORIGIN_X = "origin_auto_x";
+    public static final String EXTRA_ORIGIN_Y = "origin_auto_y";
 
     public static final String ACTION_BALLS =
             "com.drawlines.android.BALLS_DETECTED";
@@ -98,9 +91,7 @@ public class ScreenCaptureService extends Service {
     }
 
     private void createNotificationChannel() {
-
         if (Build.VERSION.SDK_INT >= 26) {
-
             NotificationChannel channel =
                     new NotificationChannel(
                             CHANNEL_ID,
@@ -116,7 +107,6 @@ public class ScreenCaptureService extends Service {
     }
 
     private Notification createNotification() {
-
         Notification.Builder builder;
 
         if (Build.VERSION.SDK_INT >= 26) {
@@ -127,59 +117,39 @@ public class ScreenCaptureService extends Service {
 
         return builder
                 .setContentTitle("DrawLines")
-                .setContentText("Seguimiento automático")
+                .setContentText("Seguimiento de la mesa")
                 .setSmallIcon(android.R.drawable.ic_menu_view)
                 .setOngoing(true)
                 .build();
     }
 
     @Override
-    public int onStartCommand(
-            Intent intent,
-            int flags,
-            int startId) {
+    public int onStartCommand(Intent intent, int flags, int startId) {
 
-        if (intent == null) {
-            stopSelf();
-            return START_NOT_STICKY;
-        }
-
-        if (captureStarted) {
+        if (intent == null || captureStarted) {
             return START_NOT_STICKY;
         }
 
         if (Build.VERSION.SDK_INT >= 29) {
-
             startForeground(
                     NOTIFICATION_ID,
                     createNotification(),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
             );
-
         } else {
-
             startForeground(
                     NOTIFICATION_ID,
                     createNotification()
             );
         }
 
-        int resultCode = intent.getIntExtra(
-                EXTRA_RESULT_CODE,
-                0
-        );
+        int resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0);
 
         Intent data;
 
         if (Build.VERSION.SDK_INT >= 33) {
-
-            data = intent.getParcelableExtra(
-                    EXTRA_DATA,
-                    Intent.class
-            );
-
+            data = intent.getParcelableExtra(EXTRA_DATA, Intent.class);
         } else {
-
             data = intent.getParcelableExtra(EXTRA_DATA);
         }
 
@@ -194,20 +164,13 @@ public class ScreenCaptureService extends Service {
         return START_NOT_STICKY;
     }
 
-    private void startCapture(
-            int resultCode,
-            Intent data) {
-
+    private void startCapture(int resultCode, Intent data) {
         try {
-
             MediaProjectionManager manager =
                     (MediaProjectionManager)
-                            getSystemService(
-                                    Context.MEDIA_PROJECTION_SERVICE
-                            );
+                            getSystemService(Context.MEDIA_PROJECTION_SERVICE);
 
-            mediaProjection =
-                    manager.getMediaProjection(resultCode, data);
+            mediaProjection = manager.getMediaProjection(resultCode, data);
 
             if (mediaProjection == null) {
                 stopSelf();
@@ -216,17 +179,13 @@ public class ScreenCaptureService extends Service {
 
             mediaProjection.registerCallback(
                     new MediaProjection.Callback() {
-
                         @Override
                         public void onStop() {
-
                             projectionStopped = true;
                             mediaProjection = null;
-
                             releaseDisplay();
                             stopSelf();
                         }
-
                     },
                     captureHandler
             );
@@ -254,26 +213,19 @@ public class ScreenCaptureService extends Service {
                     captureHandler
             );
 
-            virtualDisplay =
-                    mediaProjection.createVirtualDisplay(
-                            "DrawLinesCapture",
-                            width,
-                            height,
-                            density,
-                            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                            imageReader.getSurface(),
-                            null,
-                            captureHandler
-                    );
-
-        } catch (Exception e) {
-
-            Log.e(
-                    "DrawLines",
-                    "Error iniciando captura",
-                    e
+            virtualDisplay = mediaProjection.createVirtualDisplay(
+                    "DrawLinesCapture",
+                    width,
+                    height,
+                    density,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    imageReader.getSurface(),
+                    null,
+                    captureHandler
             );
 
+        } catch (Exception e) {
+            Log.e("DrawLines", "Error iniciando captura", e);
             releaseDisplay();
             stopSelf();
         }
@@ -284,7 +236,6 @@ public class ScreenCaptureService extends Service {
         Image image = null;
 
         try {
-
             image = reader.acquireLatestImage();
 
             if (image == null) {
@@ -306,20 +257,21 @@ public class ScreenCaptureService extends Service {
                 return;
             }
 
-            boolean trackingEnabled =
-                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                            .getBoolean(PREF_TRACKING, false);
+            detectAndBroadcastBalls(image, imageWidth, imageHeight);
 
-            List<BallDetector.Ball> balls =
-                    BallDetector.detectBalls(image);
+            SharedPreferences preferences =
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 
-            broadcastBalls(balls, imageWidth, imageHeight);
+            boolean trackingEnabled = preferences.getBoolean(
+                    PREF_TRACKING,
+                    false
+            );
 
             if (!trackingEnabled) {
                 return;
             }
 
-            // Busca automáticamente la bola blanca.
+            // Detecta automáticamente el centro de la bola blanca.
             BallDetector.Ball whiteBall =
                     WhiteBallDetector.detect(image);
 
@@ -327,26 +279,27 @@ public class ScreenCaptureService extends Service {
                 return;
             }
 
-            // Las dos guías se analizan desde el centro
-            // actualizado de la bola blanca.
+            float originX = whiteBall.x;
+            float originY = whiteBall.y;
+
+            if (originX < 0 || originY < 0
+                    || originX >= imageWidth
+                    || originY >= imageHeight) {
+                return;
+            }
+
             detectAndBroadcastLines(
                     image,
                     imageWidth,
                     imageHeight,
-                    whiteBall.x,
-                    whiteBall.y
+                    originX,
+                    originY
             );
 
         } catch (Exception e) {
-
-            Log.e(
-                    "DrawLines",
-                    "Error analizando imagen",
-                    e
-            );
+            Log.e("DrawLines", "Error analizando imagen", e);
 
         } finally {
-
             if (image != null) {
                 image.close();
             }
@@ -361,7 +314,6 @@ public class ScreenCaptureService extends Service {
             float originY) {
 
         try {
-
             List<WhiteLineDetector.DetectedLine> lines =
                     WhiteLineDetector.detectLines(
                             image,
@@ -375,52 +327,45 @@ public class ScreenCaptureService extends Service {
             float[] rhos = new float[count];
 
             for (int i = 0; i < count; i++) {
-
                 WhiteLineDetector.DetectedLine line = lines.get(i);
-
                 angles[i] = line.angle;
                 rhos[i] = line.rho;
             }
 
             Intent result = new Intent(ACTION_LINES);
-
             result.setPackage(getPackageName());
 
             result.putExtra(EXTRA_LINE_ANGLES, angles);
             result.putExtra(EXTRA_LINE_RHOS, rhos);
             result.putExtra(EXTRA_LINE_COUNT, count);
-
             result.putExtra(EXTRA_IMAGE_WIDTH, imageWidth);
             result.putExtra(EXTRA_IMAGE_HEIGHT, imageHeight);
 
+            // Envía el centro actualizado en cada captura.
             result.putExtra(EXTRA_ORIGIN_X, originX);
             result.putExtra(EXTRA_ORIGIN_Y, originY);
 
             sendBroadcast(result);
 
         } catch (Exception e) {
-
-            Log.e(
-                    "DrawLines",
-                    "Error detectando trayectorias",
-                    e
-            );
+            Log.e("DrawLines", "Error detectando líneas", e);
         }
     }
 
-    private void broadcastBalls(
-            List<BallDetector.Ball> balls,
+    private void detectAndBroadcastBalls(
+            Image image,
             int imageWidth,
             int imageHeight) {
 
         try {
+            List<BallDetector.Ball> balls =
+                    BallDetector.detectBalls(image);
 
             List<Float> positionsX = new ArrayList<>();
             List<Float> positionsY = new ArrayList<>();
             List<Float> radii = new ArrayList<>();
 
             for (BallDetector.Ball ball : balls) {
-
                 positionsX.add(ball.x / imageWidth);
                 positionsY.add(ball.y / imageHeight);
                 radii.add(ball.radius / imageWidth);
@@ -431,14 +376,12 @@ public class ScreenCaptureService extends Service {
             float[] rs = new float[radii.size()];
 
             for (int i = 0; i < positionsX.size(); i++) {
-
                 xs[i] = positionsX.get(i);
                 ys[i] = positionsY.get(i);
                 rs[i] = radii.get(i);
             }
 
             Intent result = new Intent(ACTION_BALLS);
-
             result.setPackage(getPackageName());
 
             result.putExtra(EXTRA_BALL_XS, xs);
@@ -449,12 +392,7 @@ public class ScreenCaptureService extends Service {
             sendBroadcast(result);
 
         } catch (Exception e) {
-
-            Log.e(
-                    "DrawLines",
-                    "Error transmitiendo bolas",
-                    e
-            );
+            Log.e("DrawLines", "Error detectando bolas", e);
         }
     }
 
@@ -485,7 +423,6 @@ public class ScreenCaptureService extends Service {
         mediaProjection = null;
 
         if (projection != null && !projectionStopped) {
-
             projectionStopped = true;
             projection.stop();
         }
