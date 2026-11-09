@@ -7,7 +7,6 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
 import android.graphics.PixelFormat;
 import android.hardware.display.DisplayManager;
@@ -24,8 +23,8 @@ import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.WindowManager;
 
-import java.util.List;
 import java.util.ArrayList;
+import java.util.List;
 
 public class ScreenCaptureService extends Service {
 
@@ -55,6 +54,12 @@ public class ScreenCaptureService extends Service {
     public static final String EXTRA_IMAGE_HEIGHT =
             "detected_image_height";
 
+    public static final String EXTRA_ORIGIN_X =
+            "detected_origin_x";
+
+    public static final String EXTRA_ORIGIN_Y =
+            "detected_origin_y";
+
     public static final String ACTION_BALLS =
             "com.drawlines.android.BALLS_DETECTED";
 
@@ -65,14 +70,8 @@ public class ScreenCaptureService extends Service {
 
     private static final int NOTIFICATION_ID = 92;
     private static final String CHANNEL_ID = "drawlines_capture";
-
     private static final String PREFS_NAME = "drawlines_origin";
-    private static final String PREF_X = "origin_x";
-    private static final String PREF_Y = "origin_y";
-    private static final String PREF_SELECTED = "origin_selected";
     private static final String PREF_TRACKING = "tracking_enabled";
-    private static final String PREF_VIEW_WIDTH = "view_width";
-    private static final String PREF_VIEW_HEIGHT = "view_height";
 
     private MediaProjection mediaProjection;
     private VirtualDisplay virtualDisplay;
@@ -95,9 +94,7 @@ public class ScreenCaptureService extends Service {
         captureThread = new HandlerThread("DrawLinesCapture");
         captureThread.start();
 
-        captureHandler = new Handler(
-                captureThread.getLooper()
-        );
+        captureHandler = new Handler(captureThread.getLooper());
     }
 
     private void createNotificationChannel() {
@@ -130,7 +127,7 @@ public class ScreenCaptureService extends Service {
 
         return builder
                 .setContentTitle("DrawLines")
-                .setContentText("Captura de pantalla preparada")
+                .setContentText("Seguimiento automático")
                 .setSmallIcon(android.R.drawable.ic_menu_view)
                 .setOngoing(true)
                 .build();
@@ -192,7 +189,6 @@ public class ScreenCaptureService extends Service {
         }
 
         captureStarted = true;
-
         startCapture(resultCode, data);
 
         return START_NOT_STICKY;
@@ -228,7 +224,6 @@ public class ScreenCaptureService extends Service {
                             mediaProjection = null;
 
                             releaseDisplay();
-
                             stopSelf();
                         }
 
@@ -237,13 +232,11 @@ public class ScreenCaptureService extends Service {
             );
 
             WindowManager windowManager =
-                    (WindowManager)
-                            getSystemService(WINDOW_SERVICE);
+                    (WindowManager) getSystemService(WINDOW_SERVICE);
 
             DisplayMetrics metrics = new DisplayMetrics();
 
-            windowManager.getDefaultDisplay()
-                    .getRealMetrics(metrics);
+            windowManager.getDefaultDisplay().getRealMetrics(metrics);
 
             int width = metrics.widthPixels;
             int height = metrics.heightPixels;
@@ -306,12 +299,6 @@ public class ScreenCaptureService extends Service {
 
             lastDetectionTime = now;
 
-            SharedPreferences preferences =
-                    getSharedPreferences(
-                            PREFS_NAME,
-                            MODE_PRIVATE
-                    );
-
             int imageWidth = image.getWidth();
             int imageHeight = image.getHeight();
 
@@ -319,104 +306,36 @@ public class ScreenCaptureService extends Service {
                 return;
             }
 
-            // Se conserva la detección de bolas.
-            detectAndBroadcastBalls(
-                    image,
-                    imageWidth,
-                    imageHeight
-            );
+            boolean trackingEnabled =
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                            .getBoolean(PREF_TRACKING, false);
 
-            boolean trackingEnabled = preferences.getBoolean(
-                    PREF_TRACKING,
-                    false
-            );
+            List<BallDetector.Ball> balls =
+                    BallDetector.detectBalls(image);
 
-            // Si el seguimiento está apagado,
-            // no modifica las últimas líneas dibujadas.
+            broadcastBalls(balls, imageWidth, imageHeight);
+
             if (!trackingEnabled) {
                 return;
             }
 
-            // No se detecta ninguna línea hasta que
-            // el usuario haya seleccionado un punto.
-            boolean selected = preferences.getBoolean(
-                    PREF_SELECTED,
-                    false
-            );
+            // Busca automáticamente la bola blanca.
+            BallDetector.Ball whiteBall =
+                    WhiteBallDetector.detect(image);
 
-            if (!selected) {
+            if (whiteBall == null) {
                 return;
             }
 
-            float savedX = preferences.getFloat(
-                    PREF_X,
-                    -1f
-            );
-
-            float savedY = preferences.getFloat(
-                    PREF_Y,
-                    -1f
-            );
-
-            int savedWidth = preferences.getInt(
-                    PREF_VIEW_WIDTH,
-                    0
-            );
-
-            int savedHeight = preferences.getInt(
-                    PREF_VIEW_HEIGHT,
-                    0
-            );
-
-            if (savedX < 0
-                    || savedY < 0
-                    || savedWidth <= 0
-                    || savedHeight <= 0) {
-                return;
-            }
-
-            // Convierte el punto del panel a coordenadas
-            // de la imagen capturada.
-            float scaleX = (float) imageWidth / savedWidth;
-            float scaleY = (float) imageHeight / savedHeight;
-
-            float originX = savedX * scaleX;
-            float originY = savedY * scaleY;
-
-            if (originX < 0
-                    || originY < 0
-                    || originX >= imageWidth
-                    || originY >= imageHeight) {
-                return;
-            }
-
-            // Busca las líneas únicamente alrededor
-            // del punto seleccionado por el usuario.
+            // Las dos guías se analizan desde el centro
+            // actualizado de la bola blanca.
             detectAndBroadcastLines(
                     image,
                     imageWidth,
                     imageHeight,
-                    originX,
-                    originY
+                    whiteBall.x,
+                    whiteBall.y
             );
-
-            // Se conserva la transmisión de dirección anterior.
-            Float angle = WhiteLineDetector.detectAngle(
-                    image,
-                    originX,
-                    originY
-            );
-
-            if (angle != null) {
-
-                Intent result = new Intent(ACTION_DIRECTION);
-
-                result.setPackage(getPackageName());
-
-                result.putExtra(EXTRA_ANGLE, angle);
-
-                sendBroadcast(result);
-            }
 
         } catch (Exception e) {
 
@@ -474,27 +393,27 @@ public class ScreenCaptureService extends Service {
             result.putExtra(EXTRA_IMAGE_WIDTH, imageWidth);
             result.putExtra(EXTRA_IMAGE_HEIGHT, imageHeight);
 
+            result.putExtra(EXTRA_ORIGIN_X, originX);
+            result.putExtra(EXTRA_ORIGIN_Y, originY);
+
             sendBroadcast(result);
 
         } catch (Exception e) {
 
             Log.e(
                     "DrawLines",
-                    "Error detectando líneas desde el punto seleccionado",
+                    "Error detectando trayectorias",
                     e
             );
         }
     }
 
-    private void detectAndBroadcastBalls(
-            Image image,
+    private void broadcastBalls(
+            List<BallDetector.Ball> balls,
             int imageWidth,
             int imageHeight) {
 
         try {
-
-            List<BallDetector.Ball> balls =
-                    BallDetector.detectBalls(image);
 
             List<Float> positionsX = new ArrayList<>();
             List<Float> positionsY = new ArrayList<>();
@@ -533,7 +452,7 @@ public class ScreenCaptureService extends Service {
 
             Log.e(
                     "DrawLines",
-                    "Error detectando bolas",
+                    "Error transmitiendo bolas",
                     e
             );
         }
