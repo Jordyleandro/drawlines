@@ -48,6 +48,7 @@ public class FloatingLineService extends Service {
 
     private boolean trackingEnabled = false;
     private boolean receiverRegistered = false;
+    private boolean panelVisible = true;
 
     private final BroadcastReceiver directionReceiver =
             new BroadcastReceiver() {
@@ -308,6 +309,7 @@ public class FloatingLineService extends Service {
                 getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 
         if (!lineView.hasSelectedPoint()) {
+
             trackingEnabled = false;
 
             preferences.edit()
@@ -342,6 +344,10 @@ public class FloatingLineService extends Service {
 
     private void disableLineTouch() {
 
+        if (lineView == null || lineParams == null) {
+            return;
+        }
+
         lineView.setTouchMode(MODE_IDLE);
 
         lineParams.flags =
@@ -351,8 +357,13 @@ public class FloatingLineService extends Service {
 
         windowManager.updateViewLayout(lineView, lineParams);
 
-        pointButton.setText("PUNTO");
-        adjustButton.setText("AJUSTAR");
+        if (pointButton != null) {
+            pointButton.setText("PUNTO");
+        }
+
+        if (adjustButton != null) {
+            adjustButton.setText("AJUSTAR");
+        }
     }
 
     private void activatePointMode() {
@@ -384,25 +395,42 @@ public class FloatingLineService extends Service {
 
     private void toggleVisibility() {
 
-        boolean visible = !lineView.isVisible();
+        if (panelVisible) {
 
-        lineView.setVisible(visible);
-
-        hideButton.setText(
-                visible ? "OCULTAR" : "MOSTRAR"
-        );
-
-        if (!visible) {
             disableLineTouch();
+            panelVisible = false;
+
+            pointButton.setVisibility(View.GONE);
+            adjustButton.setVisibility(View.GONE);
+            trackingButton.setVisibility(View.GONE);
+            coordinateLabel.setVisibility(View.GONE);
+
+            hideButton.setText("MOSTRAR");
+
+        } else {
+
+            panelVisible = true;
+
+            pointButton.setVisibility(View.VISIBLE);
+            adjustButton.setVisibility(View.VISIBLE);
+            trackingButton.setVisibility(View.VISIBLE);
+            coordinateLabel.setVisibility(View.VISIBLE);
+
+            hideButton.setText("OCULTAR");
         }
+
+        // La capa de dibujo nunca se oculta aquí.
+        lineView.invalidate();
     }
 
     private void updateCoordinates(float x, float y) {
 
-        coordinateLabel.setText(
-                "X: " + Math.round(x)
-                        + "   Y: " + Math.round(y)
-        );
+        if (coordinateLabel != null) {
+            coordinateLabel.setText(
+                    "X: " + Math.round(x)
+                            + "   Y: " + Math.round(y)
+            );
+        }
     }
 
     @Override
@@ -461,7 +489,6 @@ public class FloatingLineService extends Service {
         private float endY = 450;
 
         private boolean pointSelected = false;
-        private boolean visible = true;
 
         private int touchMode = MODE_IDLE;
 
@@ -513,15 +540,6 @@ public class FloatingLineService extends Service {
             touchMode = mode;
         }
 
-        boolean isVisible() {
-            return visible;
-        }
-
-        void setVisible(boolean value) {
-            visible = value;
-            invalidate();
-        }
-
         void updateAutomaticDirection(float angle) {
 
             if (!trackingEnabled || !pointSelected) {
@@ -542,7 +560,7 @@ public class FloatingLineService extends Service {
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
 
-            if (!visible || !pointSelected) {
+            if (!pointSelected) {
                 return;
             }
 
@@ -684,37 +702,11 @@ public class FloatingLineService extends Service {
                         updateCoordinates(startX, startY);
                         invalidate();
 
+                        // Al seleccionar la bola, liberamos los toques
+                        // para que puedas mover el taco en el juego.
+                        post(() -> disableLineTouch());
+
                         return true;
                     }
 
-                    if (touchMode == MODE_ADJUST && pointSelected) {
-
-                        endX = x;
-                        endY = y;
-
-                        invalidate();
-                        return true;
-                    }
-
-                    return true;
-
-                case MotionEvent.ACTION_MOVE:
-
-                    if (touchMode == MODE_ADJUST && pointSelected) {
-
-                        endX = x;
-                        endY = y;
-
-                        invalidate();
-                    }
-
-                    return true;
-
-                case MotionEvent.ACTION_UP:
-                    return true;
-            }
-
-            return true;
-        }
-    }
-}
+              
