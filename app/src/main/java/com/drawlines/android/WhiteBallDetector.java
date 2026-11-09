@@ -1,26 +1,20 @@
 package com.drawlines.android;
 
 import android.media.Image;
-
 import java.nio.ByteBuffer;
 import java.util.List;
 
 public final class WhiteBallDetector {
 
-    private WhiteBallDetector() {
-    }
+    private WhiteBallDetector() {}
 
-    public static BallDetector.Ball detect(Image image) {
+    public static BallDetector.Ball detect(
+            Image image,
+            List<BallDetector.Ball> balls) {
 
-        if (image == null || image.getPlanes() == null
+        if (image == null || balls == null || balls.isEmpty()
+                || image.getPlanes() == null
                 || image.getPlanes().length == 0) {
-            return null;
-        }
-
-        List<BallDetector.Ball> balls =
-                BallDetector.detectBalls(image);
-
-        if (balls.isEmpty()) {
             return null;
         }
 
@@ -36,28 +30,18 @@ public final class WhiteBallDetector {
         float bestScore = -1f;
 
         for (BallDetector.Ball ball : balls) {
+            int cx = Math.round(ball.x);
+            int cy = Math.round(ball.y);
+            int radius = Math.max(2, Math.round(ball.radius * 0.25f));
 
-            int centerX = Math.round(ball.x);
-            int centerY = Math.round(ball.y);
-
-            int red = 0;
-            int green = 0;
-            int blue = 0;
-            int samples = 0;
-
-            int radius = Math.max(
-                    2,
-                    Math.round(ball.radius * 0.25f)
-            );
+            int red = 0, green = 0, blue = 0, samples = 0;
 
             for (int oy = -radius; oy <= radius; oy += 2) {
                 for (int ox = -radius; ox <= radius; ox += 2) {
+                    int x = cx + ox;
+                    int y = cy + oy;
 
-                    int x = centerX + ox;
-                    int y = centerY + oy;
-
-                    if (x < 0 || y < 0
-                            || x >= width || y >= height) {
+                    if (x < 0 || y < 0 || x >= width || y >= height) {
                         continue;
                     }
 
@@ -67,33 +51,27 @@ public final class WhiteBallDetector {
                         continue;
                     }
 
-                    red += buffer.get(index) & 0xFF;
-                    green += buffer.get(index + 1) & 0xFF;
-                    blue += buffer.get(index + 2) & 0xFF;
-
+                    red += buffer.get(index) & 255;
+                    green += buffer.get(index + 1) & 255;
+                    blue += buffer.get(index + 2) & 255;
                     samples++;
                 }
             }
 
-            if (samples == 0) {
-                continue;
-            }
+            if (samples == 0) continue;
 
             red /= samples;
             green /= samples;
             blue /= samples;
 
-            int minimum = Math.min(red, Math.min(green, blue));
-            int maximum = Math.max(red, Math.max(green, blue));
-
+            int min = Math.min(red, Math.min(green, blue));
+            int max = Math.max(red, Math.max(green, blue));
             int brightness = (red + green + blue) / 3;
-            int difference = maximum - minimum;
+            int difference = max - min;
 
-            if (brightness < 165 || difference > 65) {
-                continue;
-            }
+            if (brightness < 175 || difference > 48) continue;
 
-            float score = brightness - difference * 2f;
+            float score = brightness - difference * 2.5f;
 
             if (score > bestScore) {
                 bestScore = score;
@@ -102,5 +80,10 @@ public final class WhiteBallDetector {
         }
 
         return bestBall;
+    }
+
+    public static BallDetector.Ball detect(Image image) {
+        if (image == null) return null;
+        return detect(image, BallDetector.detectBalls(image));
     }
 }
