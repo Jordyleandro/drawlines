@@ -62,7 +62,6 @@ public class FloatingLineService extends Service {
 
             String action = intent.getAction();
 
-            // Recibir dirección de la línea blanca.
             if (ScreenCaptureService.ACTION_DIRECTION.equals(action)) {
 
                 if (!trackingEnabled) {
@@ -81,7 +80,6 @@ public class FloatingLineService extends Service {
                 return;
             }
 
-            // Recibir posiciones de las bolas.
             if (ScreenCaptureService.ACTION_BALLS.equals(action)) {
 
                 float[] xs = intent.getFloatArrayExtra(
@@ -509,7 +507,6 @@ public class FloatingLineService extends Service {
         private final Paint pointPaint =
                 new Paint(Paint.ANTI_ALIAS_FLAG);
 
-        // Pintura para marcar las bolas detectadas.
         private final Paint ballPaint =
                 new Paint(Paint.ANTI_ALIAS_FLAG);
 
@@ -614,6 +611,40 @@ public class FloatingLineService extends Service {
             invalidate();
         }
 
+        // Ajusta el origen al centro de la bola detectada más cercana.
+        private void snapToNearestBall() {
+
+            if (ballXs == null || ballYs == null || ballRadii == null) {
+                return;
+            }
+
+            float nearestDistance = Float.MAX_VALUE;
+            int nearestIndex = -1;
+
+            for (int i = 0; i < ballXs.length; i++) {
+
+                float dx = startX - ballXs[i];
+                float dy = startY - ballYs[i];
+
+                float distance = (float) Math.sqrt(dx * dx + dy * dy);
+
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestIndex = i;
+                }
+            }
+
+            if (nearestIndex >= 0) {
+
+                float radius = ballRadii[nearestIndex];
+
+                if (nearestDistance <= radius * 2.5f) {
+                    startX = ballXs[nearestIndex];
+                    startY = ballYs[nearestIndex];
+                }
+            }
+        }
+
         void updateAutomaticDirection(float angle) {
 
             if (!trackingEnabled || !pointSelected) {
@@ -634,7 +665,6 @@ public class FloatingLineService extends Service {
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
 
-            // Dibujar las bolas detectadas.
             drawDetectedBalls(canvas);
 
             if (!pointSelected) {
@@ -778,8 +808,11 @@ public class FloatingLineService extends Service {
                         startX = x;
                         startY = y;
 
-                        endX = x + 250f;
-                        endY = y;
+                        // Busca el centro de la bola más cercana.
+                        snapToNearestBall();
+
+                        endX = startX + 250f;
+                        endY = startY;
 
                         pointSelected = true;
 
