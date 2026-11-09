@@ -61,6 +61,12 @@ public class ScreenCaptureService extends Service {
     public static final String EXTRA_BALL_RADII = "ball_radii";
     public static final String EXTRA_BALL_COUNT = "ball_count";
 
+    // Datos de la bola blanca.
+    public static final String EXTRA_CUE_FOUND = "cue_ball_found";
+    public static final String EXTRA_CUE_X = "cue_ball_x";
+    public static final String EXTRA_CUE_Y = "cue_ball_y";
+    public static final String EXTRA_CUE_RADIUS = "cue_ball_radius";
+
     private static final int NOTIFICATION_ID = 92;
     private static final String CHANNEL_ID = "drawlines_capture";
     private static final String PREFS_NAME = "drawlines_origin";
@@ -275,8 +281,6 @@ public class ScreenCaptureService extends Service {
                 return;
             }
 
-            // Detecta la línea directamente en la imagen.
-            // Ya no necesita localizar primero la bola blanca.
             detectAndBroadcastLines(
                     image,
                     imageWidth,
@@ -323,7 +327,6 @@ public class ScreenCaptureService extends Service {
             result.putExtra(EXTRA_IMAGE_WIDTH, imageWidth);
             result.putExtra(EXTRA_IMAGE_HEIGHT, imageHeight);
 
-            // No se utiliza una bola como origen.
             result.putExtra(EXTRA_ORIGIN_X, -1f);
             result.putExtra(EXTRA_ORIGIN_Y, -1f);
 
@@ -363,6 +366,10 @@ public class ScreenCaptureService extends Service {
                 rs[i] = radii.get(i);
             }
 
+            // Detectar específicamente la bola blanca.
+            BallDetector.Ball cue =
+                    WhiteBallDetector.detect(image);
+
             Intent result = new Intent(ACTION_BALLS);
             result.setPackage(getPackageName());
 
@@ -370,6 +377,27 @@ public class ScreenCaptureService extends Service {
             result.putExtra(EXTRA_BALL_YS, ys);
             result.putExtra(EXTRA_BALL_RADII, rs);
             result.putExtra(EXTRA_BALL_COUNT, balls.size());
+
+            boolean cueFound = cue != null;
+
+            result.putExtra(EXTRA_CUE_FOUND, cueFound);
+
+            if (cueFound) {
+                result.putExtra(
+                        EXTRA_CUE_X,
+                        cue.x / imageWidth
+                );
+
+                result.putExtra(
+                        EXTRA_CUE_Y,
+                        cue.y / imageHeight
+                );
+
+                result.putExtra(
+                        EXTRA_CUE_RADIUS,
+                        cue.radius / imageWidth
+                );
+            }
 
             sendBroadcast(result);
 
