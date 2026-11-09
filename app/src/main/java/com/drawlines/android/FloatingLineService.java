@@ -134,6 +134,38 @@ public class FloatingLineService extends Service {
                 if (xs != null && ys != null && radii != null) {
                     lineView.updateDetectedBalls(xs, ys, radii);
                 }
+
+                boolean cueFound = intent.getBooleanExtra(
+                        ScreenCaptureService.EXTRA_CUE_FOUND,
+                        false
+                );
+
+                if (trackingEnabled && cueFound) {
+
+                    float cueX = intent.getFloatExtra(
+                            ScreenCaptureService.EXTRA_CUE_X,
+                            -1f
+                    );
+
+                    float cueY = intent.getFloatExtra(
+                            ScreenCaptureService.EXTRA_CUE_Y,
+                            -1f
+                    );
+
+                    float cueRadius = intent.getFloatExtra(
+                            ScreenCaptureService.EXTRA_CUE_RADIUS,
+                            0f
+                    );
+
+                    lineView.updateCueBall(
+                            cueX,
+                            cueY,
+                            cueRadius
+                    );
+
+                } else {
+                    lineView.clearShotGuide();
+                }
             }
         }
     };
@@ -368,6 +400,7 @@ public class FloatingLineService extends Service {
 
         if (!trackingEnabled) {
             lineView.clearDetectedLines();
+            lineView.clearShotGuide();
         }
 
         trackingButton.setText(
@@ -421,6 +454,7 @@ public class FloatingLineService extends Service {
 
         trackingButton.setText("SEGUIMIENTO DESACTIVADO");
 
+        lineView.clearShotGuide();
         lineView.setTouchMode(MODE_POINT);
         enableLineTouch();
 
@@ -514,9 +548,27 @@ public class FloatingLineService extends Service {
 
     private class LineView extends View {
 
-        private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint pointPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint ballPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint linePaint =
+                new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        private final Paint pointPaint =
+                new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        private final Paint ballPaint =
+                new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        // Pinturas de la guía de trayectoria.
+        private final Paint guideYellow =
+                new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        private final Paint guideBlue =
+                new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        private final Paint guideGreen =
+                new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        private final Paint guideTarget =
+                new Paint(Paint.ANTI_ALIAS_FLAG);
 
         private float startX = 600;
         private float startY = 450;
@@ -537,6 +589,9 @@ public class FloatingLineService extends Service {
         private int detectedImageHeight;
         private int detectedLineCount = 0;
 
+        private BallDetector.Ball cueBall;
+        private ShotGuideEngine.Guide currentGuide;
+
         LineView() {
             super(FloatingLineService.this);
 
@@ -551,6 +606,24 @@ public class FloatingLineService extends Service {
             ballPaint.setColor(Color.CYAN);
             ballPaint.setStrokeWidth(3f);
             ballPaint.setStyle(Paint.Style.STROKE);
+
+            guideYellow.setColor(Color.YELLOW);
+            guideYellow.setStrokeWidth(6f);
+            guideYellow.setStyle(Paint.Style.STROKE);
+            guideYellow.setStrokeCap(Paint.Cap.ROUND);
+
+            guideBlue.setColor(Color.BLUE);
+            guideBlue.setStrokeWidth(5f);
+            guideBlue.setStyle(Paint.Style.STROKE);
+
+            guideGreen.setColor(Color.GREEN);
+            guideGreen.setStrokeWidth(6f);
+            guideGreen.setStyle(Paint.Style.STROKE);
+            guideGreen.setStrokeCap(Paint.Cap.ROUND);
+
+            guideTarget.setColor(Color.GREEN);
+            guideTarget.setStrokeWidth(3f);
+            guideTarget.setStyle(Paint.Style.STROKE);
 
             setLayerType(View.LAYER_TYPE_SOFTWARE, null);
 
@@ -593,7 +666,16 @@ public class FloatingLineService extends Service {
             invalidate();
         }
 
-        void updateDetectedBalls(float[] xs, float[] ys, float[] radii) {
+        void clearShotGuide() {
+            cueBall = null;
+            currentGuide = null;
+            invalidate();
+        }
+
+        void updateDetectedBalls(
+                float[] xs,
+                float[] ys,
+                float[] radii) {
 
             if (xs == null || ys == null || radii == null) {
                 return;
@@ -621,7 +703,100 @@ public class FloatingLineService extends Service {
                 ballRadii[i] = radii[i] * width;
             }
 
+            recalculateShotGuide();
             invalidate();
+        }
+
+        void updateCueBall(
+                float normalizedX,
+                float normalizedY,
+                float normalizedRadius) {
+
+            if (normalizedX < 0f || normalizedY < 0f
+                    || normalizedX > 1f || normalizedY > 1f
+                    || normalizedRadius <= 0f) {
+                clearShotGuide();
+                return;
+            }
+
+            float width = getWidth();
+            float height = getHeight();
+
+            if (width <= 0 || height <= 0) {
+                return;
+            }
+
+            cueBall = new BallDetector.Ball(
+                    normalizedX * width,
+                    normalizedY * height,
+                    normalizedRadius * width
+            );
+
+            recalculateShotGuide();
+            invalidate();
+        }
+
+        private void recalculateShotGuide() {
+
+            if (cueBall == null
+                    || ballXs.length == 0
+                    || getWidth() <= 0
+                    || getHeight() <= 0) {
+
+                currentGuide = null;
+                return;
+            }
+
+            List<BallDetector.Ball> detected =
+                    new ArrayList<>();
+
+            int closestCueIndex = -1;
+            float closestDistance = Float.MAX_VALUE;
+
+            // La detección general también incluye la bola blanca.
+            // Buscamos esa misma bola para no duplicarla en el cálculo.
+            for (int i = 0; i < ballXs.length; i++) {
+
+                float dx = ballXs[i] - cueBall.x;
+                float dy = ballYs[i] - cueBall.y;
+
+                float distance = (float) Math.sqrt(
+                        dx * dx + dy * dy
+                );
+
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    closestCueIndex = i;
+                }
+            }
+
+            for (int i = 0; i < ballXs.length; i++) {
+
+                // Se excluye la detección que corresponde a la blanca.
+                if (i == closestCueIndex
+                        && closestDistance
+                        < cueBall.radius * 2.5f) {
+                    continue;
+                }
+
+                detected.add(
+                        new BallDetector.Ball(
+                                ballXs[i],
+                                ballYs[i],
+                                ballRadii[i]
+                        )
+                );
+            }
+
+            // Se agrega la blanca detectada específicamente.
+            detected.add(cueBall);
+
+            currentGuide = ShotGuideEngine.calculateBest(
+                    cueBall,
+                    detected,
+                    getWidth(),
+                    getHeight()
+            );
         }
 
         void updateDetectedLines(
@@ -695,9 +870,6 @@ public class FloatingLineService extends Service {
                 float nx = (float) Math.cos(theta);
                 float ny = (float) Math.sin(theta);
 
-                // La ecuación original es:
-                // x*cos(theta) + y*sin(theta) = rho.
-                // Se transforma a las coordenadas del panel.
                 float a = nx / scaleX;
                 float b = ny / scaleY;
                 float c = detectedRhos[i];
@@ -783,6 +955,60 @@ public class FloatingLineService extends Service {
             // La detección automática utiliza ACTION_LINES.
         }
 
+        private void drawShotGuide(Canvas canvas) {
+
+            if (cueBall == null || currentGuide == null) {
+                return;
+            }
+
+            float markerRadius = Math.max(
+                    7f,
+                    cueBall.radius * 0.45f
+            );
+
+            // AMARILLO: recorrido de la blanca hasta la posición ideal.
+            canvas.drawLine(
+                    cueBall.x,
+                    cueBall.y,
+                    currentGuide.ghostX,
+                    currentGuide.ghostY,
+                    guideYellow
+            );
+
+            // AZUL: punto de contacto con la bola objetivo.
+            canvas.drawCircle(
+                    currentGuide.contactX,
+                    currentGuide.contactY,
+                    markerRadius,
+                    guideBlue
+            );
+
+            // VERDE: recorrido estimado de la bola objetivo a la tronera.
+            canvas.drawLine(
+                    currentGuide.target.x,
+                    currentGuide.target.y,
+                    currentGuide.pocketX,
+                    currentGuide.pocketY,
+                    guideGreen
+            );
+
+            // Marca el punto de impacto ideal de la blanca.
+            canvas.drawCircle(
+                    currentGuide.ghostX,
+                    currentGuide.ghostY,
+                    markerRadius,
+                    guideYellow
+            );
+
+            // Resalta la bola objetivo.
+            canvas.drawCircle(
+                    currentGuide.target.x,
+                    currentGuide.target.y,
+                    currentGuide.target.radius + 3f,
+                    guideTarget
+            );
+        }
+
         @Override
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
@@ -790,6 +1016,8 @@ public class FloatingLineService extends Service {
             if (detectedLineCount > 0) {
                 drawDetectedLines(canvas);
             }
+
+            drawShotGuide(canvas);
         }
 
         private void drawReflections(Canvas canvas) {
