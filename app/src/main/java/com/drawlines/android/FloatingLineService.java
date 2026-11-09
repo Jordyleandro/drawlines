@@ -43,7 +43,6 @@ public class FloatingLineService extends Service {
     private static final String PREF_Y = "origin_y";
     private static final String PREF_SELECTED = "origin_selected";
     private static final String PREF_TRACKING = "tracking_enabled";
-
     private static final String PREF_VIEW_WIDTH = "view_width";
     private static final String PREF_VIEW_HEIGHT = "view_height";
 
@@ -53,6 +52,7 @@ public class FloatingLineService extends Service {
 
     private final BroadcastReceiver directionReceiver =
             new BroadcastReceiver() {
+
         @Override
         public void onReceive(Context context, Intent intent) {
 
@@ -84,11 +84,22 @@ public class FloatingLineService extends Service {
                         ScreenCaptureService.EXTRA_IMAGE_HEIGHT, 0
                 );
 
-                if (angles != null && rhos != null) {
+                float originX = intent.getFloatExtra(
+                        ScreenCaptureService.EXTRA_ORIGIN_X, -1f
+                );
+
+                float originY = intent.getFloatExtra(
+                        ScreenCaptureService.EXTRA_ORIGIN_Y, -1f
+                );
+
+                if (angles != null && rhos != null
+                        && originX >= 0 && originY >= 0) {
                     lineView.updateDetectedLines(
-                            angles, rhos, imageWidth, imageHeight
+                            angles, rhos, imageWidth, imageHeight,
+                            originX, originY
                     );
                 }
+
                 return;
             }
 
@@ -106,6 +117,7 @@ public class FloatingLineService extends Service {
                 if (!Float.isNaN(angle)) {
                     lineView.updateAutomaticDirection(angle);
                 }
+
                 return;
             }
 
@@ -155,6 +167,7 @@ public class FloatingLineService extends Service {
         String channelId = "drawlines_channel";
 
         if (Build.VERSION.SDK_INT >= 26) {
+
             NotificationChannel channel =
                     new NotificationChannel(
                             channelId,
@@ -260,6 +273,7 @@ public class FloatingLineService extends Service {
         pointParams.y = 180;
 
         pointButton.setOnClickListener(v -> activatePointMode());
+
         windowManager.addView(pointButton, pointParams);
 
         adjustButton = createButton("AJUSTAR");
@@ -276,6 +290,7 @@ public class FloatingLineService extends Service {
         adjustParams.y = 240;
 
         adjustButton.setOnClickListener(v -> activateAdjustMode());
+
         windowManager.addView(adjustButton, adjustParams);
 
         trackingButton = createButton(
@@ -296,6 +311,7 @@ public class FloatingLineService extends Service {
         trackingParams.y = 300;
 
         trackingButton.setOnClickListener(v -> toggleTracking());
+
         windowManager.addView(trackingButton, trackingParams);
 
         hideButton = createButton("OCULTAR");
@@ -312,6 +328,7 @@ public class FloatingLineService extends Service {
         hideParams.y = 360;
 
         hideButton.setOnClickListener(v -> toggleVisibility());
+
         windowManager.addView(hideButton, hideParams);
     }
 
@@ -340,18 +357,6 @@ public class FloatingLineService extends Service {
 
         SharedPreferences preferences =
                 getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-
-        if (!lineView.hasSelectedPoint()) {
-
-            trackingEnabled = false;
-
-            preferences.edit()
-                    .putBoolean(PREF_TRACKING, false)
-                    .apply();
-
-            trackingButton.setText("SELECCIONA PRIMERO EL PUNTO");
-            return;
-        }
 
         trackingEnabled = !trackingEnabled;
 
@@ -491,7 +496,6 @@ public class FloatingLineService extends Service {
     }
 
     private void removeView(View view) {
-
         if (view != null && view.isAttachedToWindow()) {
             windowManager.removeView(view);
         }
@@ -504,15 +508,12 @@ public class FloatingLineService extends Service {
 
     private class LineView extends View {
 
-        private final Paint linePaint =
-                new Paint(Paint.ANTI_ALIAS_FLAG);
-
-        private final Paint ballPaint =
-                new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint pointPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint ballPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         private float startX = 600;
         private float startY = 450;
-
         private float endX = 850;
         private float endY = 450;
 
@@ -532,17 +533,20 @@ public class FloatingLineService extends Service {
         LineView() {
             super(FloatingLineService.this);
 
-            // Las dos trayectorias se dibujan en blanco.
             linePaint.setColor(Color.WHITE);
             linePaint.setStrokeWidth(5f);
             linePaint.setStyle(Paint.Style.STROKE);
             linePaint.setStrokeCap(Paint.Cap.ROUND);
+
+            pointPaint.setColor(Color.WHITE);
+            pointPaint.setStyle(Paint.Style.FILL);
 
             ballPaint.setColor(Color.CYAN);
             ballPaint.setStrokeWidth(3f);
             ballPaint.setStyle(Paint.Style.STROKE);
 
             setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+
             restoreSelectedPoint();
         }
 
@@ -551,12 +555,9 @@ public class FloatingLineService extends Service {
             SharedPreferences preferences =
                     getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 
-            pointSelected = preferences.getBoolean(
-                    PREF_SELECTED, false
-            );
+            pointSelected = preferences.getBoolean(PREF_SELECTED, false);
 
             if (pointSelected) {
-
                 startX = preferences.getFloat(PREF_X, 600f);
                 startY = preferences.getFloat(PREF_Y, 450f);
 
@@ -578,10 +579,7 @@ public class FloatingLineService extends Service {
             touchMode = mode;
         }
 
-        void updateDetectedBalls(
-                float[] xs,
-                float[] ys,
-                float[] radii) {
+        void updateDetectedBalls(float[] xs, float[] ys, float[] radii) {
 
             if (xs == null || ys == null || radii == null) {
                 return;
@@ -616,11 +614,16 @@ public class FloatingLineService extends Service {
                 float[] angles,
                 float[] rhos,
                 int imageWidth,
-                int imageHeight) {
+                int imageHeight,
+                float detectedOriginX,
+                float detectedOriginY) {
 
-            if (!trackingEnabled || !pointSelected
+            if (!trackingEnabled
                     || angles == null || rhos == null
-                    || imageWidth <= 0 || imageHeight <= 0) {
+                    || imageWidth <= 0 || imageHeight <= 0
+                    || detectedOriginX < 0 || detectedOriginY < 0
+                    || detectedOriginX >= imageWidth
+                    || detectedOriginY >= imageHeight) {
                 return;
             }
 
@@ -643,8 +646,26 @@ public class FloatingLineService extends Service {
             float scaleX = viewWidth / imageWidth;
             float scaleY = viewHeight / imageHeight;
 
-            float originX = startX / scaleX;
-            float originY = startY / scaleY;
+            // Centro automático detectado de la bola blanca.
+            float originX = detectedOriginX;
+            float originY = detectedOriginY;
+
+            startX = originX * scaleX;
+            startY = originY * scaleY;
+            pointSelected = true;
+
+            SharedPreferences preferences =
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
+            preferences.edit()
+                    .putFloat(PREF_X, startX)
+                    .putFloat(PREF_Y, startY)
+                    .putInt(PREF_VIEW_WIDTH, getWidth())
+                    .putInt(PREF_VIEW_HEIGHT, getHeight())
+                    .putBoolean(PREF_SELECTED, true)
+                    .apply();
+
+            updateCoordinates(startX, startY);
 
             float left = imageWidth * 0.195f;
             float right = imageWidth * 0.805f;
@@ -670,4 +691,312 @@ public class FloatingLineService extends Service {
                 float length = (float) Math.hypot(dx, dy);
 
                 if (length < 0.0001f) {
-                    c
+                    continue;
+                }
+
+                dx /= length;
+                dy /= length;
+
+                float tMin = Float.NEGATIVE_INFINITY;
+                float tMax = Float.POSITIVE_INFINITY;
+
+                if (Math.abs(imageDx) < 0.00001f) {
+                    if (originX < left || originX > right) {
+                        continue;
+                    }
+                } else {
+                    float t1 = (left - originX) / imageDx;
+                    float t2 = (right - originX) / imageDx;
+
+                    tMin = Math.max(tMin, Math.min(t1, t2));
+                    tMax = Math.min(tMax, Math.max(t1, t2));
+                }
+
+                if (Math.abs(imageDy) < 0.00001f) {
+                    if (originY < top || originY > bottom) {
+                        continue;
+                    }
+                } else {
+                    float t1 = (top - originY) / imageDy;
+                    float t2 = (bottom - originY) / imageDy;
+
+                    tMin = Math.max(tMin, Math.min(t1, t2));
+                    tMax = Math.min(tMax, Math.max(t1, t2));
+                }
+
+                if (tMin >= tMax) {
+                    continue;
+                }
+
+                newAngles[validCount] = angles[i];
+                newDx[validCount] = dx;
+                newDy[validCount] = dy;
+
+                validCount++;
+            }
+
+            detectedAngles = new float[validCount];
+            detectedDx = new float[validCount];
+            detectedDy = new float[validCount];
+
+            System.arraycopy(
+                    newAngles, 0,
+                    detectedAngles, 0,
+                    validCount
+            );
+
+            System.arraycopy(
+                    newDx, 0,
+                    detectedDx, 0,
+                    validCount
+            );
+
+            System.arraycopy(
+                    newDy, 0,
+                    detectedDy, 0,
+                    validCount
+            );
+
+            detectedLineCount = validCount;
+
+            invalidate();
+        }
+
+        private void drawDetectedLines(Canvas canvas) {
+
+            float width = getWidth();
+            float height = getHeight();
+
+            float left = width * 0.195f;
+            float right = width * 0.805f;
+            float top = height * 0.236f;
+            float bottom = height * 0.916f;
+
+            for (int i = 0; i < detectedLineCount; i++) {
+
+                float dx = detectedDx[i];
+                float dy = detectedDy[i];
+
+                float tMin = Float.NEGATIVE_INFINITY;
+                float tMax = Float.POSITIVE_INFINITY;
+
+                if (Math.abs(dx) < 0.00001f) {
+                    if (startX < left || startX > right) {
+                        continue;
+                    }
+                } else {
+                    float t1 = (left - startX) / dx;
+                    float t2 = (right - startX) / dx;
+
+                    tMin = Math.max(tMin, Math.min(t1, t2));
+                    tMax = Math.min(tMax, Math.max(t1, t2));
+                }
+
+                if (Math.abs(dy) < 0.00001f) {
+                    if (startY < top || startY > bottom) {
+                        continue;
+                    }
+                } else {
+                    float t1 = (top - startY) / dy;
+                    float t2 = (bottom - startY) / dy;
+
+                    tMin = Math.max(tMin, Math.min(t1, t2));
+                    tMax = Math.min(tMax, Math.max(t1, t2));
+                }
+
+                if (tMin >= tMax) {
+                    continue;
+                }
+
+                canvas.drawLine(
+                        startX + dx * tMin,
+                        startY + dy * tMin,
+                        startX + dx * tMax,
+                        startY + dy * tMax,
+                        linePaint
+                );
+            }
+        }
+
+        void updateAutomaticDirection(float angle) {
+            // Las líneas se reciben mediante ACTION_LINES.
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+
+            if (detectedLineCount > 0) {
+                drawDetectedLines(canvas);
+            }
+        }
+
+        private void drawReflections(Canvas canvas) {
+
+            float width = getWidth();
+            float height = getHeight();
+
+            if (width <= 0 || height <= 0) {
+                return;
+            }
+
+            float left = width * 0.195f;
+            float right = width * 0.805f;
+            float top = height * 0.236f;
+            float bottom = height * 0.916f;
+
+            float dx = endX - startX;
+            float dy = endY - startY;
+
+            float length = (float) Math.hypot(dx, dy);
+
+            if (length < 1f) {
+                return;
+            }
+
+            dx /= length;
+            dy /= length;
+
+            float x = startX;
+            float y = startY;
+
+            for (int i = 0; i < 8; i++) {
+
+                float tx = Float.POSITIVE_INFINITY;
+                float ty = Float.POSITIVE_INFINITY;
+
+                if (dx > 0.00001f) {
+                    tx = (right - x) / dx;
+                } else if (dx < -0.00001f) {
+                    tx = (left - x) / dx;
+                }
+
+                if (dy > 0.00001f) {
+                    ty = (bottom - y) / dy;
+                } else if (dy < -0.00001f) {
+                    ty = (top - y) / dy;
+                }
+
+                float distance = Math.min(tx, ty);
+
+                if (!Float.isFinite(distance) || distance <= 0) {
+                    break;
+                }
+
+                float nextX = x + dx * distance;
+                float nextY = y + dy * distance;
+
+                canvas.drawLine(
+                        x, y,
+                        nextX, nextY,
+                        linePaint
+                );
+
+                boolean hitX = Math.abs(tx - distance) < 0.01f;
+                boolean hitY = Math.abs(ty - distance) < 0.01f;
+
+                x = nextX;
+                y = nextY;
+
+                if (hitX) {
+                    dx = -dx;
+                }
+
+                if (hitY) {
+                    dy = -dy;
+                }
+
+                if (hitX) {
+                    x += dx * 0.1f;
+                }
+
+                if (hitY) {
+                    y += dy * 0.1f;
+                }
+            }
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+
+            if (touchMode == MODE_IDLE) {
+                return false;
+            }
+
+            float x = event.getX();
+            float y = event.getY();
+
+            switch (event.getAction()) {
+
+                case MotionEvent.ACTION_DOWN:
+
+                    if (touchMode == MODE_POINT) {
+
+                        startX = x;
+                        startY = y;
+
+                        detectedLineCount = 0;
+                        detectedAngles = new float[0];
+                        detectedDx = new float[0];
+                        detectedDy = new float[0];
+
+                        endX = startX + 250f;
+                        endY = startY;
+
+                        pointSelected = true;
+
+                        SharedPreferences preferences =
+                                getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
+                        preferences.edit()
+                                .putFloat(PREF_X, startX)
+                                .putFloat(PREF_Y, startY)
+                                .putInt(PREF_VIEW_WIDTH, getWidth())
+                                .putInt(PREF_VIEW_HEIGHT, getHeight())
+                                .putBoolean(PREF_SELECTED, true)
+                                .apply();
+
+                        updateCoordinates(startX, startY);
+                        invalidate();
+
+                        post(() -> disableLineTouch());
+
+                        return true;
+                    }
+
+                    if (touchMode == MODE_ADJUST && pointSelected) {
+                        endX = x;
+                        endY = y;
+                        invalidate();
+                        return true;
+                    }
+
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+
+                    if (touchMode == MODE_ADJUST && pointSelected) {
+                        endX = x;
+                        endY = y;
+                        invalidate();
+                    }
+
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+
+                    if (touchMode == MODE_ADJUST) {
+                        post(() -> disableLineTouch());
+                    }
+
+                    return true;
+
+                case MotionEvent.ACTION_CANCEL:
+                    post(() -> disableLineTouch());
+                    return true;
+            }
+
+            return true;
+        }
+    }
+}
