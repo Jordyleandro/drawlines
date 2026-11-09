@@ -10,14 +10,19 @@ import java.util.List;
 
 public final class BallDetector {
 
-    // La mesa conserva su posición y proporciones en pantalla.
+    // Se conservan las coordenadas originales de la mesa.
     private static final float TABLE_LEFT = 0.195f;
     private static final float TABLE_RIGHT = 0.805f;
     private static final float TABLE_TOP = 0.236f;
     private static final float TABLE_BOTTOM = 0.916f;
 
-    private static final int SCAN_STEP = 5;
+    private static final int SCAN_STEP = 4;
     private static final int RING_SAMPLES = 24;
+
+    private static final float MIN_CONTRAST = 45f;
+    private static final int MIN_RING_HITS = 16;
+    private static final int MIN_CONTIGUOUS_HITS = 5;
+    private static final int MIN_QUADRANTS = 3;
 
     private BallDetector() {}
 
@@ -69,7 +74,6 @@ public final class BallDetector {
         int rowStride = plane.getRowStride();
         int pixelStride = plane.getPixelStride();
 
-        // Tamaños aproximados de las bolas respecto al ancho de pantalla.
         float[] radii = {
             width * 0.0085f,
             width * 0.0095f,
@@ -79,7 +83,6 @@ public final class BallDetector {
         List<Candidate> candidates = new ArrayList<>();
 
         for (float radius : radii) {
-
             int margin = (int) Math.ceil(radius * 1.25f);
 
             for (int y = top + margin; y < bottom - margin; y += SCAN_STEP) {
@@ -96,7 +99,7 @@ public final class BallDetector {
                         pixelStride
                     );
 
-                    if (score >= 0.63f) {
+                    if (score > 0f) {
                         candidates.add(
                             new Candidate(x, y, radius, score)
                         );
@@ -105,7 +108,6 @@ public final class BallDetector {
             }
         }
 
-        // Primero se conservan las detecciones con mejor borde circular.
         Collections.sort(candidates, new Comparator<Candidate>() {
             @Override
             public int compare(Candidate a, Candidate b) {
@@ -113,9 +115,7 @@ public final class BallDetector {
             }
         });
 
-        // Elimina varias detecciones de una misma bola.
         for (Candidate candidate : candidates) {
-
             boolean duplicate = false;
 
             for (Ball existing : result) {
@@ -124,7 +124,7 @@ public final class BallDetector {
                 float distance = (float) Math.sqrt(dx * dx + dy * dy);
 
                 float minimumDistance =
-                    Math.min(candidate.radius, existing.radius) * 1.35f;
+                    Math.min(candidate.radius, existing.radius) * 1.5f;
 
                 if (distance < minimumDistance) {
                     duplicate = true;
@@ -140,7 +140,8 @@ public final class BallDetector {
                 ));
             }
 
-            if (result.size() >= 30) break;
+            // Una partida de billar no necesita más de 16 bolas.
+            if (result.size() >= 16) break;
         }
 
         return result;
@@ -170,20 +171,21 @@ public final class BallDetector {
 
         if (centerColor == null) return 0f;
 
-        int contrastCount = 0;
+        int hits = 0;
+        int currentRun = 0;
+        int longestRun = 0;
 
-        // Comprueba el contraste alrededor de toda la circunferencia.
+        int[] quadrantHits = new int[4];
+
         for (int i = 0; i < RING_SAMPLES; i++) {
-
-            double angle =
-                (Math.PI * 2.0 * i) / RING_SAMPLES;
+            double angle = (Math.PI * 2.0 * i) / RING_SAMPLES;
 
             int x = Math.round(
-                centerX + (float) Math.cos(angle) * radius * 1.08f
+                centerX + (float) Math.cos(angle) * radius
             );
 
             int y = Math.round(
-                centerY + (float) Math.sin(angle) * radius * 1.08f
+                centerY + (float) Math.sin(angle) * radius
             );
 
             int[] color = getColor(
@@ -196,22 +198,92 @@ public final class BallDetector {
                 pixelStride
             );
 
-            if (color == null) continue;
+            if (color == null) {
+                currentRun = 0;
+                continue;
+            }
 
-            int dr = color[0] - centerColor[0];
-            int dg = color[1] - centerColor[1];
-            int db = color[2] - centerColor[2];
+            float difference = colorDifference(centerColor, color);
 
-            float difference = (float) Math.sqrt(
-                dr * dr + dg * dg + db * db
-            );
+            if (difference >= MIN_CONTRAST) {
+                hits++;
+                currentRun++;
 
-            if (difference >= 45f) {
-                contrastCount++;
+                if (currentRun > longestRun) {
+                    longestRun = currentRun;
+                }
+
+                int quadrant = i / 6;
+                quadrantHits[quadrant]++;
+            } else {
+                currentRun = 0;
             }
         }
 
-        return contrastCount / (float) RING_SAMPLES;
+        // También comprueba la continuidad entre el final y el inicio.
+        if (currentRun > 0) {
+            int firstRun = 0;
+
+            for (int i = 0; i < RING_SAMPLES; i++) {
+                double angle = (Math.PI * 2.0 * i) / RING_SAMPLES;
+
+                int x = Math.round(
+                    centerX + (float) Math.cos(angle) * radius
+                );
+
+                int y = Math.round(
+                    centerY + (float) Math.sin(angle) * radius
+                );
+
+                int[] color = getColor(
+                    buffer,
+                    x,
+                    y,
+                    width,
+                    height,
+                    rowStride,
+                    pixelStride
+                );
+
+                if (color == null ||
+                    colorDifference(centerColor, color) < MIN_CONTRAST) {
+                    break;
+                }
+
+                firstRun++;
+            }
+
+            longestRun = Math.max(longestRun, currentRun + firstRun);
+        }
+
+        int quadrants = 0;
+
+        for (int count : quadrantHits) {
+            if (count >= 2) quadrants++;
+        }
+
+        // Una línea recta no debe confundirse con una bola.
+        if (hits < MIN_RING_HITS) return 0f;
+        if (longestRun < MIN_CONTIGUOUS_HITS) return 0f;
+        if (quadrants < MIN_QUADRANTS) return 0f;
+
+        float hitScore = hits / (float) RING_SAMPLES;
+        float runScore = Math.min(
+            1f,
+            longestRun / 10f
+        );
+
+        return hitScore * 0.75f + runScore * 0.25f;
+    }
+
+    private static float colorDifference(int[] a, int[] b) {
+        int dr = a[0] - b[0];
+        int dg = a[1] - b[1];
+        int db = a[2] - b[2];
+
+        return (float) Math.sqrt(
+            dr * dr + dg * dg + db * db
+        );
     }
 
     private static int[] averageCenterColor(
@@ -243,9 +315,8 @@ public final class BallDetector {
         int count = 0;
 
         for (int[] offset : offsets) {
-
-            int x = centerX + Math.round(offset[0] * radius * 0.35f);
-            int y = centerY + Math.round(offset[1] * radius * 0.35f);
+            int x = centerX + Math.round(offset[0] * radius * 0.30f);
+            int y = centerY + Math.round(offset[1] * radius * 0.30f);
 
             int[] color = getColor(
                 buffer,
