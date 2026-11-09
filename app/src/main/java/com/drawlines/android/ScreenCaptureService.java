@@ -117,7 +117,7 @@ public class ScreenCaptureService extends Service {
 
         return builder
                 .setContentTitle("DrawLines")
-                .setContentText("Seguimiento de la mesa")
+                .setContentText("Analizando líneas de la mesa")
                 .setSmallIcon(android.R.drawable.ic_menu_view)
                 .setOngoing(true)
                 .build();
@@ -257,7 +257,11 @@ public class ScreenCaptureService extends Service {
                 return;
             }
 
-            detectAndBroadcastBalls(image, imageWidth, imageHeight);
+            detectAndBroadcastBalls(
+                    image,
+                    imageWidth,
+                    imageHeight
+            );
 
             SharedPreferences preferences =
                     getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -271,29 +275,12 @@ public class ScreenCaptureService extends Service {
                 return;
             }
 
-            // Detecta automáticamente el centro de la bola blanca.
-            BallDetector.Ball whiteBall =
-                    WhiteBallDetector.detect(image);
-
-            if (whiteBall == null) {
-                return;
-            }
-
-            float originX = whiteBall.x;
-            float originY = whiteBall.y;
-
-            if (originX < 0 || originY < 0
-                    || originX >= imageWidth
-                    || originY >= imageHeight) {
-                return;
-            }
-
+            // Detecta la línea directamente en la imagen.
+            // Ya no necesita localizar primero la bola blanca.
             detectAndBroadcastLines(
                     image,
                     imageWidth,
-                    imageHeight,
-                    originX,
-                    originY
+                    imageHeight
             );
 
         } catch (Exception e) {
@@ -309,17 +296,11 @@ public class ScreenCaptureService extends Service {
     private void detectAndBroadcastLines(
             Image image,
             int imageWidth,
-            int imageHeight,
-            float originX,
-            float originY) {
+            int imageHeight) {
 
         try {
             List<WhiteLineDetector.DetectedLine> lines =
-                    WhiteLineDetector.detectLines(
-                            image,
-                            originX,
-                            originY
-                    );
+                    WhiteLineDetector.detectLines(image);
 
             int count = Math.min(lines.size(), 2);
 
@@ -328,6 +309,7 @@ public class ScreenCaptureService extends Service {
 
             for (int i = 0; i < count; i++) {
                 WhiteLineDetector.DetectedLine line = lines.get(i);
+
                 angles[i] = line.angle;
                 rhos[i] = line.rho;
             }
@@ -341,9 +323,9 @@ public class ScreenCaptureService extends Service {
             result.putExtra(EXTRA_IMAGE_WIDTH, imageWidth);
             result.putExtra(EXTRA_IMAGE_HEIGHT, imageHeight);
 
-            // Envía el centro actualizado en cada captura.
-            result.putExtra(EXTRA_ORIGIN_X, originX);
-            result.putExtra(EXTRA_ORIGIN_Y, originY);
+            // No se utiliza una bola como origen.
+            result.putExtra(EXTRA_ORIGIN_X, -1f);
+            result.putExtra(EXTRA_ORIGIN_Y, -1f);
 
             sendBroadcast(result);
 
