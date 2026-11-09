@@ -6,6 +6,8 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
+import android.graphics.PixelFormat;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
 import android.media.Image;
@@ -16,7 +18,6 @@ import android.os.Build;
 import android.os.IBinder;
 import android.util.DisplayMetrics;
 import android.view.WindowManager;
-import android.content.pm.ServiceInfo;
 
 public class ScreenCaptureService extends Service {
 
@@ -30,6 +31,8 @@ public class ScreenCaptureService extends Service {
     private VirtualDisplay virtualDisplay;
     private ImageReader imageReader;
 
+    private boolean captureStarted = false;
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -37,7 +40,7 @@ public class ScreenCaptureService extends Service {
     }
 
     private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT >= 26) {
             NotificationChannel channel =
                     new NotificationChannel(
                             CHANNEL_ID,
@@ -55,7 +58,7 @@ public class ScreenCaptureService extends Service {
     private Notification createNotification() {
         Notification.Builder builder;
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT >= 26) {
             builder = new Notification.Builder(this, CHANNEL_ID);
         } else {
             builder = new Notification.Builder(this);
@@ -63,7 +66,7 @@ public class ScreenCaptureService extends Service {
 
         return builder
                 .setContentTitle("DrawLines")
-                .setContentText("Analizando la dirección del juego")
+                .setContentText("Captura de pantalla activa")
                 .setSmallIcon(android.R.drawable.ic_menu_view)
                 .setOngoing(true)
                 .build();
@@ -75,12 +78,12 @@ public class ScreenCaptureService extends Service {
             int flags,
             int startId) {
 
-        if (intent == null) {
+        if (intent == null || captureStarted) {
             stopSelf();
             return START_NOT_STICKY;
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= 29) {
             startForeground(
                     NOTIFICATION_ID,
                     createNotification(),
@@ -114,12 +117,15 @@ public class ScreenCaptureService extends Service {
             return START_NOT_STICKY;
         }
 
+        captureStarted = true;
         startCapture(resultCode, data);
 
         return START_NOT_STICKY;
     }
 
-    private void startCapture(int resultCode, Intent data) {
+    private void startCapture(
+            int resultCode,
+            Intent data) {
 
         try {
             MediaProjectionManager manager =
@@ -136,12 +142,25 @@ public class ScreenCaptureService extends Service {
                 return;
             }
 
+            mediaProjection.registerCallback(
+                    new MediaProjection.Callback() {
+                        @Override
+                        public void onStop() {
+                            releaseCapture();
+                            stopSelf();
+                        }
+                    },
+                    null
+            );
+
             WindowManager windowManager =
-                    (WindowManager) getSystemService(WINDOW_SERVICE);
+                    (WindowManager)
+                            getSystemService(WINDOW_SERVICE);
 
             DisplayMetrics metrics = new DisplayMetrics();
 
-            windowManager.getDefaultDisplay().getRealMetrics(metrics);
+            windowManager.getDefaultDisplay()
+                    .getRealMetrics(metrics);
 
             int width = metrics.widthPixels;
             int height = metrics.heightPixels;
@@ -150,7 +169,7 @@ public class ScreenCaptureService extends Service {
             imageReader = ImageReader.newInstance(
                     width,
                     height,
-                    android.graphics.PixelFormat.RGBA_8888,
+                    PixelFormat.RGBA_8888,
                     2
             );
 
@@ -160,10 +179,9 @@ public class ScreenCaptureService extends Service {
 
                         if (image != null) {
                             try {
-                                // Por ahora recibimos y liberamos
-                                // cada imagen para evitar acumulación.
-                                // El análisis de la línea blanca
-                                // se conectará en el siguiente paso.
+                                // Las imágenes se reciben correctamente.
+                                // La detección de la línea blanca
+                                // se incorporará en la siguiente etapa.
                             } finally {
                                 image.close();
                             }
@@ -172,34 +190,25 @@ public class ScreenCaptureService extends Service {
                     null
             );
 
-            virtualDisplay = mediaProjection.createVirtualDisplay(
-                    "DrawLinesCapture",
-                    width,
-                    height,
-                    density,
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                    imageReader.getSurface(),
-                    null,
-                    null
-            );
-
-            mediaProjection.registerCallback(
-                    new MediaProjection.Callback() {
-                        @Override
-                        public void onStop() {
-                            stopSelf();
-                        }
-                    },
-                    null
-            );
+            virtualDisplay =
+                    mediaProjection.createVirtualDisplay(
+                            "DrawLinesCapture",
+                            width,
+                            height,
+                            density,
+                            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                            imageReader.getSurface(),
+                            null,
+                            null
+                    );
 
         } catch (Exception e) {
+            releaseCapture();
             stopSelf();
         }
     }
 
-    @Override
-    public void onDestroy() {
+    private void releaseCapture() {
 
         if (virtualDisplay != null) {
             virtualDisplay.release();
@@ -210,6 +219,11 @@ public class ScreenCaptureService extends Service {
             imageReader.close();
             imageReader = null;
         }
+    }
+
+    @Override
+    public void onDestroy() {
+        releaseCapture();
 
         if (mediaProjection != null) {
             mediaProjection.stop();
