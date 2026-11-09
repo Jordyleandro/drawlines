@@ -77,23 +77,16 @@ public class FloatingLineService extends Service {
                 );
 
                 int imageWidth = intent.getIntExtra(
-                        ScreenCaptureService.EXTRA_IMAGE_WIDTH,
-                        0
+                        ScreenCaptureService.EXTRA_IMAGE_WIDTH, 0
                 );
 
                 int imageHeight = intent.getIntExtra(
-                        ScreenCaptureService.EXTRA_IMAGE_HEIGHT,
-                        0
+                        ScreenCaptureService.EXTRA_IMAGE_HEIGHT, 0
                 );
 
-                if (angles != null && rhos != null
-                        && imageWidth > 0 && imageHeight > 0) {
-
+                if (angles != null && rhos != null) {
                     lineView.updateDetectedLines(
-                            angles,
-                            rhos,
-                            imageWidth,
-                            imageHeight
+                            angles, rhos, imageWidth, imageHeight
                     );
                 }
 
@@ -152,8 +145,7 @@ public class FloatingLineService extends Service {
                 getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 
         trackingEnabled = preferences.getBoolean(
-                PREF_TRACKING,
-                false
+                PREF_TRACKING, false
         );
 
         createOverlay();
@@ -196,10 +188,7 @@ public class FloatingLineService extends Service {
     }
 
     private WindowManager.LayoutParams createParams(
-            int width,
-            int height,
-            int gravity,
-            int flags) {
+            int width, int height, int gravity, int flags) {
 
         WindowManager.LayoutParams params =
                 new WindowManager.LayoutParams(
@@ -258,10 +247,7 @@ public class FloatingLineService extends Service {
         coordinateParams.x = 15;
         coordinateParams.y = 90;
 
-        windowManager.addView(
-                coordinateLabel,
-                coordinateParams
-        );
+        windowManager.addView(coordinateLabel, coordinateParams);
 
         pointButton = createButton("PUNTO");
 
@@ -276,9 +262,7 @@ public class FloatingLineService extends Service {
         pointParams.x = 20;
         pointParams.y = 180;
 
-        pointButton.setOnClickListener(
-                v -> activatePointMode()
-        );
+        pointButton.setOnClickListener(v -> activatePointMode());
 
         windowManager.addView(pointButton, pointParams);
 
@@ -295,9 +279,7 @@ public class FloatingLineService extends Service {
         adjustParams.x = 20;
         adjustParams.y = 240;
 
-        adjustButton.setOnClickListener(
-                v -> activateAdjustMode()
-        );
+        adjustButton.setOnClickListener(v -> activateAdjustMode());
 
         windowManager.addView(adjustButton, adjustParams);
 
@@ -318,9 +300,7 @@ public class FloatingLineService extends Service {
         trackingParams.x = 20;
         trackingParams.y = 300;
 
-        trackingButton.setOnClickListener(
-                v -> toggleTracking()
-        );
+        trackingButton.setOnClickListener(v -> toggleTracking());
 
         windowManager.addView(trackingButton, trackingParams);
 
@@ -337,9 +317,7 @@ public class FloatingLineService extends Service {
         hideParams.x = 20;
         hideParams.y = 360;
 
-        hideButton.setOnClickListener(
-                v -> toggleVisibility()
-        );
+        hideButton.setOnClickListener(v -> toggleVisibility());
 
         windowManager.addView(hideButton, hideParams);
     }
@@ -353,15 +331,12 @@ public class FloatingLineService extends Service {
         filter.addAction(ScreenCaptureService.ACTION_LINES);
 
         if (Build.VERSION.SDK_INT >= 33) {
-
             registerReceiver(
                     directionReceiver,
                     filter,
                     Context.RECEIVER_NOT_EXPORTED
             );
-
         } else {
-
             registerReceiver(directionReceiver, filter);
         }
 
@@ -498,11 +473,7 @@ public class FloatingLineService extends Service {
     }
 
     @Override
-    public int onStartCommand(
-            Intent intent,
-            int flags,
-            int startId) {
-
+    public int onStartCommand(Intent intent, int flags, int startId) {
         return START_NOT_STICKY;
     }
 
@@ -527,7 +498,6 @@ public class FloatingLineService extends Service {
     }
 
     private void removeView(View view) {
-
         if (view != null && view.isAttachedToWindow()) {
             windowManager.removeView(view);
         }
@@ -540,35 +510,23 @@ public class FloatingLineService extends Service {
 
     private class LineView extends View {
 
-        private final Paint linePaint =
-                new Paint(Paint.ANTI_ALIAS_FLAG);
-
-        private final Paint pointPaint =
-                new Paint(Paint.ANTI_ALIAS_FLAG);
-
-        private final Paint ballPaint =
-                new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint pointPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint ballPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         private float startX = 600;
         private float startY = 450;
-
         private float endX = 850;
         private float endY = 450;
 
         private boolean pointSelected = false;
-
         private int touchMode = MODE_IDLE;
 
         private float[] ballXs = new float[0];
         private float[] ballYs = new float[0];
         private float[] ballRadii = new float[0];
 
-        // Extremos normalizados de las dos líneas detectadas.
-        private float[] detectedStartX = new float[0];
-        private float[] detectedStartY = new float[0];
-        private float[] detectedEndX = new float[0];
-        private float[] detectedEndY = new float[0];
-
+        private float[] detectedAngles = new float[0];
         private int detectedLineCount = 0;
 
         LineView() {
@@ -596,13 +554,9 @@ public class FloatingLineService extends Service {
             SharedPreferences preferences =
                     getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 
-            pointSelected = preferences.getBoolean(
-                    PREF_SELECTED,
-                    false
-            );
+            pointSelected = preferences.getBoolean(PREF_SELECTED, false);
 
             if (pointSelected) {
-
                 startX = preferences.getFloat(PREF_X, 600f);
                 startY = preferences.getFloat(PREF_Y, 450f);
 
@@ -624,19 +578,13 @@ public class FloatingLineService extends Service {
             touchMode = mode;
         }
 
-        void updateDetectedBalls(
-                float[] xs,
-                float[] ys,
-                float[] radii) {
+        void updateDetectedBalls(float[] xs, float[] ys, float[] radii) {
 
             if (xs == null || ys == null || radii == null) {
                 return;
             }
 
-            int count = Math.min(
-                    xs.length,
-                    Math.min(ys.length, radii.length)
-            );
+            int count = Math.min(xs.length, Math.min(ys.length, radii.length));
 
             float width = getWidth();
             float height = getHeight();
@@ -650,7 +598,6 @@ public class FloatingLineService extends Service {
             ballRadii = new float[count];
 
             for (int i = 0; i < count; i++) {
-
                 ballXs[i] = xs[i] * width;
                 ballYs[i] = ys[i] * height;
                 ballRadii[i] = radii[i] * width;
@@ -663,439 +610,55 @@ public class FloatingLineService extends Service {
                 int imageWidth,
                 int imageHeight) {
 
-            if (!trackingEnabled
-                    || angles == null
-                    || rhos == null
-                    || imageWidth <= 0
-                    || imageHeight <= 0) {
+            if (!trackingEnabled || !pointSelected
+                    || angles == null || rhos == null
+                    || imageWidth <= 0 || imageHeight <= 0) {
                 return;
             }
 
-            int count = Math.min(
-                    2,
-                    Math.min(angles.length, rhos.length)
-            );
+            int count = Math.min(2, Math.min(angles.length, rhos.length));
 
-            float[] newStartX = new float[count];
-            float[] newStartY = new float[count];
-            float[] newEndX = new float[count];
-            float[] newEndY = new float[count];
+            if (count == 0) {
+                return;
+            }
 
-            int validCount = 0;
+            float viewWidth = getWidth();
+            float viewHeight = getHeight();
+
+            if (viewWidth <= 0 || viewHeight <= 0) {
+                return;
+            }
+
+            float originX = startX * imageWidth / viewWidth;
+            float originY = startY * imageHeight / viewHeight;
 
             float left = imageWidth * 0.195f;
             float right = imageWidth * 0.805f;
             float top = imageHeight * 0.236f;
             float bottom = imageHeight * 0.916f;
 
+            float[] newAngles = new float[count];
+            int validCount = 0;
+
             for (int i = 0; i < count; i++) {
 
-                float theta = (float) Math.toRadians(angles[i]);
-                float cos = (float) Math.cos(theta);
-                float sin = (float) Math.sin(theta);
-                float rho = rhos[i];
+                double theta = Math.toRadians(angles[i]);
 
-                float[] px = new float[4];
-                float[] py = new float[4];
-                int points = 0;
+                float dx = (float) -Math.sin(theta);
+                float dy = (float) Math.cos(theta);
 
-                // Intersección con el borde izquierdo.
-                if (Math.abs(sin) > 0.0001f) {
-                    float y = (rho - left * cos) / sin;
-                    points = addIntersection(
-                            px, py, points,
-                            left, y, left, right, top, bottom
-                    );
+                float tMin = Float.NEGATIVE_INFINITY;
+                float tMax = Float.POSITIVE_INFINITY;
+
+                if (Math.abs(dx) < 0.00001f) {
+                    if (originX < left || originX > right) continue;
+                } else {
+                    float t1 = (left - originX) / dx;
+                    float t2 = (right - originX) / dx;
+                    tMin = Math.max(tMin, Math.min(t1, t2));
+                    tMax = Math.min(tMax, Math.max(t1, t2));
                 }
 
-                // Intersección con el borde derecho.
-                if (Math.abs(sin) > 0.0001f) {
-                    float y = (rho - right * cos) / sin;
-                    points = addIntersection(
-                            px, py, points,
-                            right, y, left, right, top, bottom
-                    );
-                }
-
-                // Intersección con el borde superior.
-                if (Math.abs(cos) > 0.0001f) {
-                    float x = (rho - top * sin) / cos;
-                    points = addIntersection(
-                            px, py, points,
-                            x, top, left, right, top, bottom
-                    );
-                }
-
-                // Intersección con el borde inferior.
-                if (Math.abs(cos) > 0.0001f) {
-                    float x = (rho - bottom * sin) / cos;
-                    points = addIntersection(
-                            px, py, points,
-                            x, bottom, left, right, top, bottom
-                    );
-                }
-
-                if (points < 2) {
-                    continue;
-                }
-
-                // Busca los dos puntos más alejados.
-                int first = 0;
-                int second = 1;
-                float longest = -1f;
-
-                for (int a = 0; a < points; a++) {
-                    for (int b = a + 1; b < points; b++) {
-
-                        float dx = px[b] - px[a];
-                        float dy = py[b] - py[a];
-                        float distance = dx * dx + dy * dy;
-
-                        if (distance > longest) {
-                            longest = distance;
-                            first = a;
-                            second = b;
-                        }
-                    }
-                }
-
-                newStartX[validCount] = px[first] / imageWidth;
-                newStartY[validCount] = py[first] / imageHeight;
-                newEndX[validCount] = px[second] / imageWidth;
-                newEndY[validCount] = py[second] / imageHeight;
-
-                validCount++;
-            }
-
-            // Solo sustituye las líneas si encontró líneas válidas.
-            // Si no encuentra ninguna, conserva las anteriores.
-            if (validCount > 0) {
-
-                detectedStartX = new float[validCount];
-                detectedStartY = new float[validCount];
-                detectedEndX = new float[validCount];
-                detectedEndY = new float[validCount];
-
-                System.arraycopy(
-                        newStartX, 0, detectedStartX, 0, validCount
-                );
-
-                System.arraycopy(
-                        newStartY, 0, detectedStartY, 0, validCount
-                );
-
-                System.arraycopy(
-                        newEndX, 0, detectedEndX, 0, validCount
-                );
-
-                System.arraycopy(
-                        newEndY, 0, detectedEndY, 0, validCount
-                );
-
-                detectedLineCount = validCount;
-
-                invalidate();
-            }
-        }
-
-        private int addIntersection(
-                float[] px,
-                float[] py,
-                int count,
-                float x,
-                float y,
-                float left,
-                float right,
-                float top,
-                float bottom) {
-
-            if (x < left - 1f || x > right + 1f
-                    || y < top - 1f || y > bottom + 1f) {
-                return count;
-            }
-
-            x = Math.max(left, Math.min(right, x));
-            y = Math.max(top, Math.min(bottom, y));
-
-            // Evita guardar dos veces la misma esquina.
-            for (int i = 0; i < count; i++) {
-
-                float dx = px[i] - x;
-                float dy = py[i] - y;
-
-                if (dx * dx + dy * dy < 4f) {
-                    return count;
-                }
-            }
-
-            if (count < px.length) {
-                px[count] = x;
-                py[count] = y;
-                return count + 1;
-            }
-
-            return count;
-        }
-
-        // Ajusta el origen al centro de la bola detectada más cercana.
-        private void snapToNearestBall() {
-
-            if (ballXs == null || ballYs == null || ballRadii == null) {
-                return;
-            }
-
-            float nearestDistance = Float.MAX_VALUE;
-            int nearestIndex = -1;
-
-            for (int i = 0; i < ballXs.length; i++) {
-
-                float dx = startX - ballXs[i];
-                float dy = startY - ballYs[i];
-
-                float distance = (float) Math.sqrt(dx * dx + dy * dy);
-
-                if (distance < nearestDistance) {
-                    nearestDistance = distance;
-                    nearestIndex = i;
-                }
-            }
-
-            if (nearestIndex >= 0) {
-
-                float radius = ballRadii[nearestIndex];
-
-                if (nearestDistance <= radius * 2.5f) {
-                    startX = ballXs[nearestIndex];
-                    startY = ballYs[nearestIndex];
-                }
-            }
-        }
-
-        void updateAutomaticDirection(float angle) {
-
-            if (!trackingEnabled || !pointSelected) {
-                return;
-            }
-
-            double radians = Math.toRadians(angle);
-
-            float length = 250f;
-
-            endX = startX + (float) Math.cos(radians) * length;
-            endY = startY + (float) Math.sin(radians) * length;
-
-            invalidate();
-        }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            super.onDraw(canvas);
-
-            float width = getWidth();
-            float height = getHeight();
-
-            // Dibuja las líneas detectadas y prolongadas.
-            for (int i = 0; i < detectedLineCount; i++) {
-
-                canvas.drawLine(
-                        detectedStartX[i] * width,
-                        detectedStartY[i] * height,
-                        detectedEndX[i] * width,
-                        detectedEndY[i] * height,
-                        linePaint
-                );
-            }
-
-            if (!pointSelected) {
-                return;
-            }
-
-            // Mantiene la guía anterior si todavía no hay líneas detectadas.
-            if (detectedLineCount == 0) {
-                drawReflections(canvas);
-            }
-
-            canvas.drawCircle(
-                    startX, startY, 10, pointPaint
-            );
-
-            canvas.drawCircle(
-                    endX, endY, 9, pointPaint
-            );
-        }
-
-        private void drawReflections(Canvas canvas) {
-
-            float width = getWidth();
-            float height = getHeight();
-
-            if (width <= 0 || height <= 0) {
-                return;
-            }
-
-            float left = width * 0.195f;
-            float right = width * 0.805f;
-            float top = height * 0.236f;
-            float bottom = height * 0.916f;
-
-            float dx = endX - startX;
-            float dy = endY - startY;
-
-            float length = (float) Math.hypot(dx, dy);
-
-            if (length < 1f) {
-                return;
-            }
-
-            dx /= length;
-            dy /= length;
-
-            float x = startX;
-            float y = startY;
-
-            for (int i = 0; i < 8; i++) {
-
-                float tx = Float.POSITIVE_INFINITY;
-                float ty = Float.POSITIVE_INFINITY;
-
-                if (dx > 0.00001f) {
-                    tx = (right - x) / dx;
-                } else if (dx < -0.00001f) {
-                    tx = (left - x) / dx;
-                }
-
-                if (dy > 0.00001f) {
-                    ty = (bottom - y) / dy;
-                } else if (dy < -0.00001f) {
-                    ty = (top - y) / dy;
-                }
-
-                float distance = Math.min(tx, ty);
-
-                if (!Float.isFinite(distance) || distance <= 0) {
-                    break;
-                }
-
-                float nextX = x + dx * distance;
-                float nextY = y + dy * distance;
-
-                canvas.drawLine(
-                        x, y, nextX, nextY, linePaint
-                );
-
-                boolean hitLeftOrRight =
-                        Math.abs(tx - distance) < 0.01f;
-
-                boolean hitTopOrBottom =
-                        Math.abs(ty - distance) < 0.01f;
-
-                x = nextX;
-                y = nextY;
-
-                if (hitLeftOrRight) {
-                    dx = -dx;
-                }
-
-                if (hitTopOrBottom) {
-                    dy = -dy;
-                }
-
-                if (hitLeftOrRight) {
-                    x += dx * 0.1f;
-                }
-
-                if (hitTopOrBottom) {
-                    y += dy * 0.1f;
-                }
-            }
-        }
-
-        @Override
-        public boolean onTouchEvent(MotionEvent event) {
-
-            if (touchMode == MODE_IDLE) {
-                return false;
-            }
-
-            float x = event.getX();
-            float y = event.getY();
-
-            switch (event.getAction()) {
-
-                case MotionEvent.ACTION_DOWN:
-
-                    if (touchMode == MODE_POINT) {
-
-                        startX = x;
-                        startY = y;
-
-                        snapToNearestBall();
-
-                        endX = startX + 250f;
-                        endY = startY;
-
-                        pointSelected = true;
-
-                        SharedPreferences preferences =
-                                getSharedPreferences(
-                                        PREFS_NAME,
-                                        MODE_PRIVATE
-                                );
-
-                        preferences.edit()
-                                .putFloat(PREF_X, startX)
-                                .putFloat(PREF_Y, startY)
-                                .putInt(PREF_VIEW_WIDTH, getWidth())
-                                .putInt(PREF_VIEW_HEIGHT, getHeight())
-                                .putBoolean(PREF_SELECTED, true)
-                                .apply();
-
-                        updateCoordinates(startX, startY);
-                        invalidate();
-
-                        post(() -> disableLineTouch());
-
-                        return true;
-                    }
-
-                    if (touchMode == MODE_ADJUST && pointSelected) {
-
-                        endX = x;
-                        endY = y;
-
-                        invalidate();
-                        return true;
-                    }
-
-                    return true;
-
-                case MotionEvent.ACTION_MOVE:
-
-                    if (touchMode == MODE_ADJUST && pointSelected) {
-
-                        endX = x;
-                        endY = y;
-
-                        invalidate();
-                    }
-
-                    return true;
-
-                case MotionEvent.ACTION_UP:
-
-                    if (touchMode == MODE_ADJUST) {
-                        post(() -> disableLineTouch());
-                    }
-
-                    return true;
-
-                case MotionEvent.ACTION_CANCEL:
-
-                    post(() -> disableLineTouch());
-                    return true;
-            }
-
-            return true;
-        }
-    }
-}
+                if (Math.abs(dy) < 0.00001f) {
+                    if (originY < top || originY > bottom) continue;
+  
