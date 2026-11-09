@@ -10,18 +10,26 @@ import java.util.List;
 
 public final class WhiteLineDetector {
 
-    // Límites originales de la mesa.
     private static final float TABLE_LEFT = 0.195f;
     private static final float TABLE_RIGHT = 0.805f;
     private static final float TABLE_TOP = 0.236f;
     private static final float TABLE_BOTTOM = 0.916f;
 
     private static final int PIXEL_STEP = 2;
-    private static final int ANGLE_STEP = 3;
-    private static final int RHO_STEP = 3;
+    private static final int ANGLE_STEP = 2;
+    private static final int RHO_STEP = 2;
 
-    private static final int MIN_VOTES = 18;
-    private static final int MAX_LINES = 2;
+    private static final int MIN_VOTES = 8;
+    private static final int MAX_CANDIDATES = 80;
+
+    // Radio aproximado de búsqueda de la bola blanca.
+    private static final int BALL_SEARCH_RADIUS = 18;
+
+    // Distancia máxima entre el centro de la bola y cada línea.
+    private static final float MAX_ORIGIN_DISTANCE = 24f;
+
+    // Las dos líneas deben tener direcciones diferentes.
+    private static final float MIN_ANGLE_DIFFERENCE = 12f;
 
     private WhiteLineDetector() {
     }
@@ -39,8 +47,8 @@ public final class WhiteLineDetector {
     }
 
     private static class WhitePoint {
-        int x;
-        int y;
+        final int x;
+        final int y;
 
         WhitePoint(int x, int y) {
             this.x = x;
@@ -48,11 +56,25 @@ public final class WhiteLineDetector {
         }
     }
 
+    private static class BallCenter {
+        final float x;
+        final float y;
+        final int score;
+
+        BallCenter(float x, float y, int score) {
+            this.x = x;
+            this.y = y;
+            this.score = score;
+        }
+    }
+
     public static List<DetectedLine> detectLines(Image image) {
 
         List<DetectedLine> result = new ArrayList<>();
 
-        if (image == null) return result;
+        if (image == null) {
+            return result;
+        }
 
         Image.Plane[] planes = image.getPlanes();
 
@@ -76,25 +98,30 @@ public final class WhiteLineDetector {
 
         List<WhitePoint> points = new ArrayList<>();
 
-        // Recopila píxeles blancos dentro de la mesa.
         for (int y = top; y < bottom; y += PIXEL_STEP) {
             for (int x = left; x < right; x += PIXEL_STEP) {
 
                 if (isWhite(
-                        buffer,
-                        x,
-                        y,
-                        width,
-                        height,
-                        rowStride,
-                        pixelStride)) {
+                        buffer, x, y,
+                        width, height,
+                        rowStride, pixelStride)) {
 
                     points.add(new WhitePoint(x, y));
                 }
             }
         }
 
-        if (points.size() < MIN_VOTES) {
+        if (points.size() < MIN_VOTES * 2) {
+            return result;
+        }
+
+        // Primero localiza una zona compacta de blanco:
+        // candidata a ser el centro de la bola blanca.
+        BallCenter ball = findWhiteBallCenter(
+                points, left, right, top, bottom
+        );
+
+        if (ball == null) {
             return result;
         }
 
@@ -103,17 +130,20 @@ public final class WhiteLineDetector {
                 + (bottom - top) * (bottom - top)
         );
 
-        int rhoCount = (diagonal * 2) / RHO_STEP + 1;
         int angleCount = 180 / ANGLE_STEP;
+        int rhoCount = (diagonal * 2) / RHO_STEP + 1;
 
-        int[][] accumulator = new int[angleCount][rhoCount];
+        int[][] accumulator =
+                new int[angleCount][rhoCount];
 
-        // Transformada de Hough: busca líneas blancas largas.
+        // Hough: acumula las líneas blancas de la mesa.
         for (WhitePoint point : points) {
 
             for (int a = 0; a < angleCount; a++) {
 
-                double theta = Math.toRadians(a * ANGLE_STEP);
+                double theta = Math.toRadians(
+                        a * ANGLE_STEP
+                );
 
                 double rho =
                         point.x * Math.cos(theta)
@@ -129,10 +159,13 @@ public final class WhiteLineDetector {
             }
         }
 
-        List<DetectedLine> candidates = new ArrayList<>();
+        List<DetectedLine> candidates =
+                new ArrayList<>();
 
-        // Busca los máximos del acumulador.
+        // Busca máximos que además pasen cerca
+        // del centro de la bola blanca.
         for (int a = 0; a < angleCount; a++) {
+
             for (int r = 2; r < rhoCount - 2; r++) {
 
                 int votes = accumulator[a][r];
@@ -141,9 +174,25 @@ public final class WhiteLineDetector {
                     continue;
                 }
 
+                float angle = a * ANGLE_STEP;
+                float rho = r * RHO_STEP - diagonal;
+
+                double theta = Math.toRadians(angle);
+
+                float distance = Math.abs(
+                        ball.x * (float) Math.cos(theta)
+                        + ball.y * (float) Math.sin(theta)
+                        - rho
+                );
+
+                if (distance > MAX_ORIGIN_DISTANCE) {
+                    continue;
+                }
+
                 boolean maximum = true;
 
                 for (int da = -1; da <= 1 && maximum; da++) {
+
                     for (int dr = -2; dr <= 2; dr++) {
 
                         if (da == 0 && dr == 0) {
@@ -152,12 +201,13 @@ public final class WhiteLineDetector {
 
                         int neighborAngle = a + da;
 
-                        if (neighborAngle < 0 ||
-                            neighborAngle >= angleCount) {
+                        if (neighborAngle < 0
+                                || neighborAngle >= angleCount) {
                             continue;
                         }
 
-                        if (accumulator[neighborAngle][r + dr] > votes) {
+                        if (accumulator[neighborAngle][r + dr]
+                                > votes) {
                             maximum = false;
                             break;
                         }
@@ -165,12 +215,6 @@ public final class WhiteLineDetector {
                 }
 
                 if (maximum) {
-
-                    float angle = a * ANGLE_STEP;
-
-                    float rho =
-                            r * RHO_STEP - diagonal;
-
                     candidates.add(
                             new DetectedLine(angle, rho, votes)
                     );
@@ -194,47 +238,98 @@ public final class WhiteLineDetector {
                 }
         );
 
-        // Conserva líneas diferentes y evita duplicados.
+        // Conserva candidatos fuertes y diferentes.
+        List<DetectedLine> selected =
+                new ArrayList<>();
+
         for (DetectedLine candidate : candidates) {
 
             boolean duplicate = false;
 
-            for (DetectedLine existing : result) {
+            for (DetectedLine existing : selected) {
 
-                float angleDifference = Math.abs(
-                        candidate.angle - existing.angle
+                float difference = angleDifference(
+                        candidate.angle,
+                        existing.angle
                 );
 
-                angleDifference = Math.min(
-                        angleDifference,
-                        180f - angleDifference
-                );
-
-                float rhoDifference = Math.abs(
-                        candidate.rho - existing.rho
-                );
-
-                if (angleDifference < 8f &&
-                    rhoDifference < 24f) {
-
+                if (difference < MIN_ANGLE_DIFFERENCE) {
                     duplicate = true;
                     break;
                 }
             }
 
             if (!duplicate) {
-                result.add(candidate);
+                selected.add(candidate);
             }
 
-            if (result.size() >= MAX_LINES) {
+            if (selected.size() >= 2) {
+                break;
+            }
+
+            if (selected.size() >= MAX_CANDIDATES) {
                 break;
             }
         }
 
-        return result;
+        return selected;
     }
 
-    // Se conserva para que el código anterior siga compilando.
+    private static BallCenter findWhiteBallCenter(
+            List<WhitePoint> points,
+            int left,
+            int right,
+            int top,
+            int bottom) {
+
+        BallCenter best = null;
+
+        // Busca la zona con mayor concentración compacta
+        // de píxeles blancos.
+        for (int cy = top + BALL_SEARCH_RADIUS;
+             cy < bottom - BALL_SEARCH_RADIUS;
+             cy += 4) {
+
+            for (int cx = left + BALL_SEARCH_RADIUS;
+                 cx < right - BALL_SEARCH_RADIUS;
+                 cx += 4) {
+
+                int score = 0;
+
+                for (WhitePoint point : points) {
+
+                    int dx = point.x - cx;
+                    int dy = point.y - cy;
+
+                    if (dx * dx + dy * dy
+                            <= BALL_SEARCH_RADIUS * BALL_SEARCH_RADIUS) {
+                        score++;
+                    }
+                }
+
+                if (best == null || score > best.score) {
+                    best = new BallCenter(cx, cy, score);
+                }
+            }
+        }
+
+        // Evita aceptar una zona con muy pocos píxeles.
+        if (best == null || best.score < 12) {
+            return null;
+        }
+
+        return best;
+    }
+
+    private static float angleDifference(
+            float first,
+            float second) {
+
+        float difference = Math.abs(first - second);
+
+        return Math.min(difference, 180f - difference);
+    }
+
     public static Float detectAngle(
             Image image,
             float originX,
@@ -246,7 +341,6 @@ public final class WhiteLineDetector {
             return null;
         }
 
-        // El ángulo representa la dirección de la línea.
         return (lines.get(0).angle + 90f) % 180f;
     }
 
@@ -260,7 +354,7 @@ public final class WhiteLineDetector {
             int pixelStride) {
 
         if (x < 0 || y < 0 ||
-            x >= width || y >= height) {
+                x >= width || y >= height) {
             return false;
         }
 
@@ -284,7 +378,7 @@ public final class WhiteLineDetector {
                 Math.max(green, blue)
         );
 
-        return minimum >= 190 &&
-                maximum - minimum <= 55;
+        return minimum >= 190
+                && maximum - minimum <= 55;
     }
 }
