@@ -61,7 +61,6 @@ public class ScreenCaptureService extends Service {
     public static final String EXTRA_BALL_RADII = "ball_radii";
     public static final String EXTRA_BALL_COUNT = "ball_count";
 
-    // Datos de la bola blanca.
     public static final String EXTRA_CUE_FOUND = "cue_ball_found";
     public static final String EXTRA_CUE_X = "cue_ball_x";
     public static final String EXTRA_CUE_Y = "cue_ball_y";
@@ -366,9 +365,9 @@ public class ScreenCaptureService extends Service {
                 rs[i] = radii.get(i);
             }
 
-            // Detectar específicamente la bola blanca.
+            // Reutiliza las bolas detectadas; no repite el análisis.
             BallDetector.Ball cue =
-                    WhiteBallDetector.detect(image);
+                    WhiteBallDetector.detect(image, balls);
 
             Intent result = new Intent(ACTION_BALLS);
             result.setPackage(getPackageName());
@@ -383,20 +382,9 @@ public class ScreenCaptureService extends Service {
             result.putExtra(EXTRA_CUE_FOUND, cueFound);
 
             if (cueFound) {
-                result.putExtra(
-                        EXTRA_CUE_X,
-                        cue.x / imageWidth
-                );
-
-                result.putExtra(
-                        EXTRA_CUE_Y,
-                        cue.y / imageHeight
-                );
-
-                result.putExtra(
-                        EXTRA_CUE_RADIUS,
-                        cue.radius / imageWidth
-                );
+                result.putExtra(EXTRA_CUE_X, cue.x / imageWidth);
+                result.putExtra(EXTRA_CUE_Y, cue.y / imageHeight);
+                result.putExtra(EXTRA_CUE_RADIUS, cue.radius / imageWidth);
             }
 
             sendBroadcast(result);
