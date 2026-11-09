@@ -56,22 +56,49 @@ public class FloatingLineService extends Service {
         @Override
         public void onReceive(Context context, Intent intent) {
 
-            if (!trackingEnabled || lineView == null || intent == null) {
+            if (intent == null || lineView == null) {
                 return;
             }
 
-            if (!ScreenCaptureService.ACTION_DIRECTION.equals(
-                    intent.getAction())) {
+            String action = intent.getAction();
+
+            // Recibir dirección de la línea blanca.
+            if (ScreenCaptureService.ACTION_DIRECTION.equals(action)) {
+
+                if (!trackingEnabled) {
+                    return;
+                }
+
+                float angle = intent.getFloatExtra(
+                        ScreenCaptureService.EXTRA_ANGLE,
+                        Float.NaN
+                );
+
+                if (!Float.isNaN(angle)) {
+                    lineView.updateAutomaticDirection(angle);
+                }
+
                 return;
             }
 
-            float angle = intent.getFloatExtra(
-                    ScreenCaptureService.EXTRA_ANGLE,
-                    Float.NaN
-            );
+            // Recibir posiciones de las bolas.
+            if (ScreenCaptureService.ACTION_BALLS.equals(action)) {
 
-            if (!Float.isNaN(angle)) {
-                lineView.updateAutomaticDirection(angle);
+                float[] xs = intent.getFloatArrayExtra(
+                        ScreenCaptureService.EXTRA_BALL_XS
+                );
+
+                float[] ys = intent.getFloatArrayExtra(
+                        ScreenCaptureService.EXTRA_BALL_YS
+                );
+
+                float[] radii = intent.getFloatArrayExtra(
+                        ScreenCaptureService.EXTRA_BALL_RADII
+                );
+
+                if (xs != null && ys != null && radii != null) {
+                    lineView.updateDetectedBalls(xs, ys, radii);
+                }
             }
         }
     };
@@ -283,9 +310,10 @@ public class FloatingLineService extends Service {
 
     private void registerDirectionReceiver() {
 
-        IntentFilter filter = new IntentFilter(
-                ScreenCaptureService.ACTION_DIRECTION
-        );
+        IntentFilter filter = new IntentFilter();
+
+        filter.addAction(ScreenCaptureService.ACTION_DIRECTION);
+        filter.addAction(ScreenCaptureService.ACTION_BALLS);
 
         if (Build.VERSION.SDK_INT >= 33) {
 
@@ -419,7 +447,6 @@ public class FloatingLineService extends Service {
             hideButton.setText("OCULTAR");
         }
 
-        // La capa de dibujo nunca se oculta aquí.
         lineView.invalidate();
     }
 
@@ -482,6 +509,10 @@ public class FloatingLineService extends Service {
         private final Paint pointPaint =
                 new Paint(Paint.ANTI_ALIAS_FLAG);
 
+        // Pintura para marcar las bolas detectadas.
+        private final Paint ballPaint =
+                new Paint(Paint.ANTI_ALIAS_FLAG);
+
         private float startX = 600;
         private float startY = 450;
 
@@ -492,6 +523,10 @@ public class FloatingLineService extends Service {
 
         private int touchMode = MODE_IDLE;
 
+        private float[] ballXs = new float[0];
+        private float[] ballYs = new float[0];
+        private float[] ballRadii = new float[0];
+
         LineView() {
             super(FloatingLineService.this);
 
@@ -501,6 +536,10 @@ public class FloatingLineService extends Service {
 
             pointPaint.setColor(Color.YELLOW);
             pointPaint.setStyle(Paint.Style.FILL);
+
+            ballPaint.setColor(Color.CYAN);
+            ballPaint.setStrokeWidth(3f);
+            ballPaint.setStyle(Paint.Style.STROKE);
 
             setLayerType(View.LAYER_TYPE_SOFTWARE, null);
 
@@ -540,6 +579,41 @@ public class FloatingLineService extends Service {
             touchMode = mode;
         }
 
+        void updateDetectedBalls(
+                float[] xs,
+                float[] ys,
+                float[] radii) {
+
+            if (xs == null || ys == null || radii == null) {
+                return;
+            }
+
+            int count = Math.min(
+                    xs.length,
+                    Math.min(ys.length, radii.length)
+            );
+
+            float width = getWidth();
+            float height = getHeight();
+
+            if (width <= 0 || height <= 0) {
+                return;
+            }
+
+            ballXs = new float[count];
+            ballYs = new float[count];
+            ballRadii = new float[count];
+
+            for (int i = 0; i < count; i++) {
+
+                ballXs[i] = xs[i] * width;
+                ballYs[i] = ys[i] * height;
+                ballRadii[i] = radii[i] * width;
+            }
+
+            invalidate();
+        }
+
         void updateAutomaticDirection(float angle) {
 
             if (!trackingEnabled || !pointSelected) {
@@ -560,6 +634,9 @@ public class FloatingLineService extends Service {
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
 
+            // Dibujar las bolas detectadas.
+            drawDetectedBalls(canvas);
+
             if (!pointSelected) {
                 return;
             }
@@ -573,6 +650,27 @@ public class FloatingLineService extends Service {
             canvas.drawCircle(
                     endX, endY, 9, pointPaint
             );
+        }
+
+        private void drawDetectedBalls(Canvas canvas) {
+
+            for (int i = 0; i < ballXs.length; i++) {
+
+                float x = ballXs[i];
+                float y = ballYs[i];
+                float radius = ballRadii[i];
+
+                if (radius <= 0) {
+                    continue;
+                }
+
+                canvas.drawCircle(
+                        x,
+                        y,
+                        radius,
+                        ballPaint
+                );
+            }
         }
 
         private void drawReflections(Canvas canvas) {
@@ -702,8 +800,6 @@ public class FloatingLineService extends Service {
                         updateCoordinates(startX, startY);
                         invalidate();
 
-                        // Al seleccionar la bola, liberamos los toques
-                        // para que puedas mover el taco en el juego.
                         post(() -> disableLineTouch());
 
                         return true;
