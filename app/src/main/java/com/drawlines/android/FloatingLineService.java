@@ -21,6 +21,9 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.TextView;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class FloatingLineService extends Service {
 
     private WindowManager windowManager;
@@ -84,19 +87,12 @@ public class FloatingLineService extends Service {
                         ScreenCaptureService.EXTRA_IMAGE_HEIGHT, 0
                 );
 
-                float originX = intent.getFloatExtra(
-                        ScreenCaptureService.EXTRA_ORIGIN_X, -1f
-                );
-
-                float originY = intent.getFloatExtra(
-                        ScreenCaptureService.EXTRA_ORIGIN_Y, -1f
-                );
-
-                if (angles != null && rhos != null
-                        && originX >= 0 && originY >= 0) {
+                if (angles != null && rhos != null) {
                     lineView.updateDetectedLines(
-                            angles, rhos, imageWidth, imageHeight,
-                            originX, originY
+                            angles,
+                            rhos,
+                            imageWidth,
+                            imageHeight
                     );
                 }
 
@@ -198,7 +194,10 @@ public class FloatingLineService extends Service {
     }
 
     private WindowManager.LayoutParams createParams(
-            int width, int height, int gravity, int flags) {
+            int width,
+            int height,
+            int gravity,
+            int flags) {
 
         WindowManager.LayoutParams params =
                 new WindowManager.LayoutParams(
@@ -219,10 +218,10 @@ public class FloatingLineService extends Service {
 
         button.setText(text);
         button.setTextColor(Color.WHITE);
-        button.setTextSize(14);
+        button.setTextSize(12);
         button.setGravity(Gravity.CENTER);
-        button.setPadding(12, 12, 12, 12);
-        button.setBackgroundColor(Color.rgb(30, 30, 30));
+        button.setPadding(12, 10, 12, 10);
+        button.setBackgroundColor(Color.rgb(35, 35, 35));
 
         return button;
     }
@@ -242,23 +241,6 @@ public class FloatingLineService extends Service {
 
         windowManager.addView(lineView, lineParams);
 
-        coordinateLabel = createButton("X: --   Y: --");
-
-        WindowManager.LayoutParams coordinateParams =
-                createParams(
-                        WindowManager.LayoutParams.WRAP_CONTENT,
-                        WindowManager.LayoutParams.WRAP_CONTENT,
-                        Gravity.TOP | Gravity.START,
-                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                                | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                );
-
-        coordinateParams.x = 15;
-        coordinateParams.y = 90;
-
-        windowManager.addView(coordinateLabel, coordinateParams);
-
         pointButton = createButton("PUNTO");
 
         WindowManager.LayoutParams pointParams =
@@ -270,7 +252,7 @@ public class FloatingLineService extends Service {
                 );
 
         pointParams.x = 20;
-        pointParams.y = 180;
+        pointParams.y = 60;
 
         pointButton.setOnClickListener(v -> activatePointMode());
 
@@ -287,11 +269,31 @@ public class FloatingLineService extends Service {
                 );
 
         adjustParams.x = 20;
-        adjustParams.y = 240;
+        adjustParams.y = 120;
 
         adjustButton.setOnClickListener(v -> activateAdjustMode());
 
         windowManager.addView(adjustButton, adjustParams);
+
+        coordinateLabel = new TextView(this);
+        coordinateLabel.setTextColor(Color.WHITE);
+        coordinateLabel.setTextSize(12);
+        coordinateLabel.setText("X: 0   Y: 0");
+        coordinateLabel.setPadding(10, 8, 10, 8);
+        coordinateLabel.setBackgroundColor(Color.rgb(35, 35, 35));
+
+        WindowManager.LayoutParams coordinateParams =
+                createParams(
+                        WindowManager.LayoutParams.WRAP_CONTENT,
+                        WindowManager.LayoutParams.WRAP_CONTENT,
+                        Gravity.TOP | Gravity.END,
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                );
+
+        coordinateParams.x = 20;
+        coordinateParams.y = 240;
+
+        windowManager.addView(coordinateLabel, coordinateParams);
 
         trackingButton = createButton(
                 trackingEnabled
@@ -363,6 +365,10 @@ public class FloatingLineService extends Service {
         preferences.edit()
                 .putBoolean(PREF_TRACKING, trackingEnabled)
                 .apply();
+
+        if (!trackingEnabled) {
+            lineView.clearDetectedLines();
+        }
 
         trackingButton.setText(
                 trackingEnabled
@@ -525,9 +531,10 @@ public class FloatingLineService extends Service {
         private float[] ballRadii = new float[0];
 
         private float[] detectedAngles = new float[0];
-        private float[] detectedDx = new float[0];
-        private float[] detectedDy = new float[0];
+        private float[] detectedRhos = new float[0];
 
+        private int detectedImageWidth;
+        private int detectedImageHeight;
         private int detectedLineCount = 0;
 
         LineView() {
@@ -579,6 +586,13 @@ public class FloatingLineService extends Service {
             touchMode = mode;
         }
 
+        void clearDetectedLines() {
+            detectedLineCount = 0;
+            detectedAngles = new float[0];
+            detectedRhos = new float[0];
+            invalidate();
+        }
+
         void updateDetectedBalls(float[] xs, float[] ys, float[] radii) {
 
             if (xs == null || ys == null || radii == null) {
@@ -614,16 +628,11 @@ public class FloatingLineService extends Service {
                 float[] angles,
                 float[] rhos,
                 int imageWidth,
-                int imageHeight,
-                float detectedOriginX,
-                float detectedOriginY) {
+                int imageHeight) {
 
             if (!trackingEnabled
                     || angles == null || rhos == null
-                    || imageWidth <= 0 || imageHeight <= 0
-                    || detectedOriginX < 0 || detectedOriginY < 0
-                    || detectedOriginX >= imageWidth
-                    || detectedOriginY >= imageHeight) {
+                    || imageWidth <= 0 || imageHeight <= 0) {
                 return;
             }
 
@@ -633,193 +642,145 @@ public class FloatingLineService extends Service {
             );
 
             if (count == 0) {
+                clearDetectedLines();
                 return;
             }
 
-            float viewWidth = getWidth();
-            float viewHeight = getHeight();
-
-            if (viewWidth <= 0 || viewHeight <= 0) {
+            if (getWidth() <= 0 || getHeight() <= 0) {
                 return;
             }
 
-            float scaleX = viewWidth / imageWidth;
-            float scaleY = viewHeight / imageHeight;
+            detectedImageWidth = imageWidth;
+            detectedImageHeight = imageHeight;
 
-            // Centro automático detectado de la bola blanca.
-            float originX = detectedOriginX;
-            float originY = detectedOriginY;
-
-            startX = originX * scaleX;
-            startY = originY * scaleY;
-            pointSelected = true;
-
-            SharedPreferences preferences =
-                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-
-            preferences.edit()
-                    .putFloat(PREF_X, startX)
-                    .putFloat(PREF_Y, startY)
-                    .putInt(PREF_VIEW_WIDTH, getWidth())
-                    .putInt(PREF_VIEW_HEIGHT, getHeight())
-                    .putBoolean(PREF_SELECTED, true)
-                    .apply();
-
-            updateCoordinates(startX, startY);
-
-            float left = imageWidth * 0.195f;
-            float right = imageWidth * 0.805f;
-            float top = imageHeight * 0.236f;
-            float bottom = imageHeight * 0.916f;
-
-            float[] newAngles = new float[count];
-            float[] newDx = new float[count];
-            float[] newDy = new float[count];
-
-            int validCount = 0;
-
-            for (int i = 0; i < count; i++) {
-
-                double theta = Math.toRadians(angles[i]);
-
-                float imageDx = (float) -Math.sin(theta);
-                float imageDy = (float) Math.cos(theta);
-
-                float dx = imageDx * scaleX;
-                float dy = imageDy * scaleY;
-
-                float length = (float) Math.hypot(dx, dy);
-
-                if (length < 0.0001f) {
-                    continue;
-                }
-
-                dx /= length;
-                dy /= length;
-
-                float tMin = Float.NEGATIVE_INFINITY;
-                float tMax = Float.POSITIVE_INFINITY;
-
-                if (Math.abs(imageDx) < 0.00001f) {
-                    if (originX < left || originX > right) {
-                        continue;
-                    }
-                } else {
-                    float t1 = (left - originX) / imageDx;
-                    float t2 = (right - originX) / imageDx;
-
-                    tMin = Math.max(tMin, Math.min(t1, t2));
-                    tMax = Math.min(tMax, Math.max(t1, t2));
-                }
-
-                if (Math.abs(imageDy) < 0.00001f) {
-                    if (originY < top || originY > bottom) {
-                        continue;
-                    }
-                } else {
-                    float t1 = (top - originY) / imageDy;
-                    float t2 = (bottom - originY) / imageDy;
-
-                    tMin = Math.max(tMin, Math.min(t1, t2));
-                    tMax = Math.min(tMax, Math.max(t1, t2));
-                }
-
-                if (tMin >= tMax) {
-                    continue;
-                }
-
-                newAngles[validCount] = angles[i];
-                newDx[validCount] = dx;
-                newDy[validCount] = dy;
-
-                validCount++;
-            }
-
-            detectedAngles = new float[validCount];
-            detectedDx = new float[validCount];
-            detectedDy = new float[validCount];
+            detectedAngles = new float[count];
+            detectedRhos = new float[count];
 
             System.arraycopy(
-                    newAngles, 0,
+                    angles, 0,
                     detectedAngles, 0,
-                    validCount
+                    count
             );
 
             System.arraycopy(
-                    newDx, 0,
-                    detectedDx, 0,
-                    validCount
+                    rhos, 0,
+                    detectedRhos, 0,
+                    count
             );
 
-            System.arraycopy(
-                    newDy, 0,
-                    detectedDy, 0,
-                    validCount
-            );
-
-            detectedLineCount = validCount;
+            detectedLineCount = count;
 
             invalidate();
         }
 
         private void drawDetectedLines(Canvas canvas) {
 
-            float width = getWidth();
-            float height = getHeight();
+            if (detectedImageWidth <= 0
+                    || detectedImageHeight <= 0) {
+                return;
+            }
 
-            float left = width * 0.195f;
-            float right = width * 0.805f;
-            float top = height * 0.236f;
-            float bottom = height * 0.916f;
+            float scaleX = getWidth() / (float) detectedImageWidth;
+            float scaleY = getHeight() / (float) detectedImageHeight;
+
+            float left = getWidth() * 0.195f;
+            float right = getWidth() * 0.805f;
+            float top = getHeight() * 0.236f;
+            float bottom = getHeight() * 0.916f;
 
             for (int i = 0; i < detectedLineCount; i++) {
 
-                float dx = detectedDx[i];
-                float dy = detectedDy[i];
+                double theta = Math.toRadians(detectedAngles[i]);
 
-                float tMin = Float.NEGATIVE_INFINITY;
-                float tMax = Float.POSITIVE_INFINITY;
+                float nx = (float) Math.cos(theta);
+                float ny = (float) Math.sin(theta);
 
-                if (Math.abs(dx) < 0.00001f) {
-                    if (startX < left || startX > right) {
-                        continue;
-                    }
-                } else {
-                    float t1 = (left - startX) / dx;
-                    float t2 = (right - startX) / dx;
+                // La ecuación original es:
+                // x*cos(theta) + y*sin(theta) = rho.
+                // Se transforma a las coordenadas del panel.
+                float a = nx / scaleX;
+                float b = ny / scaleY;
+                float c = detectedRhos[i];
 
-                    tMin = Math.max(tMin, Math.min(t1, t2));
-                    tMax = Math.min(tMax, Math.max(t1, t2));
+                List<float[]> intersections = new ArrayList<>();
+
+                if (Math.abs(b) > 0.000001f) {
+                    addIntersection(
+                            intersections,
+                            left,
+                            (c - a * left) / b,
+                            left, right, top, bottom
+                    );
+
+                    addIntersection(
+                            intersections,
+                            right,
+                            (c - a * right) / b,
+                            left, right, top, bottom
+                    );
                 }
 
-                if (Math.abs(dy) < 0.00001f) {
-                    if (startY < top || startY > bottom) {
-                        continue;
-                    }
-                } else {
-                    float t1 = (top - startY) / dy;
-                    float t2 = (bottom - startY) / dy;
+                if (Math.abs(a) > 0.000001f) {
+                    addIntersection(
+                            intersections,
+                            (c - b * top) / a,
+                            top,
+                            left, right, top, bottom
+                    );
 
-                    tMin = Math.max(tMin, Math.min(t1, t2));
-                    tMax = Math.min(tMax, Math.max(t1, t2));
+                    addIntersection(
+                            intersections,
+                            (c - b * bottom) / a,
+                            bottom,
+                            left, right, top, bottom
+                    );
                 }
 
-                if (tMin >= tMax) {
-                    continue;
-                }
+                if (intersections.size() >= 2) {
 
-                canvas.drawLine(
-                        startX + dx * tMin,
-                        startY + dy * tMin,
-                        startX + dx * tMax,
-                        startY + dy * tMax,
-                        linePaint
-                );
+                    float[] first = intersections.get(0);
+                    float[] second = intersections.get(1);
+
+                    canvas.drawLine(
+                            first[0],
+                            first[1],
+                            second[0],
+                            second[1],
+                            linePaint
+                    );
+                }
             }
         }
 
+        private void addIntersection(
+                List<float[]> points,
+                float x,
+                float y,
+                float left,
+                float right,
+                float top,
+                float bottom) {
+
+            if (!Float.isFinite(x) || !Float.isFinite(y)) {
+                return;
+            }
+
+            if (x < left - 1 || x > right + 1
+                    || y < top - 1 || y > bottom + 1) {
+                return;
+            }
+
+            for (float[] point : points) {
+                if (Math.hypot(point[0] - x, point[1] - y) < 2) {
+                    return;
+                }
+            }
+
+            points.add(new float[]{x, y});
+        }
+
         void updateAutomaticDirection(float angle) {
-            // Las líneas se reciben mediante ACTION_LINES.
+            // La detección automática utiliza ACTION_LINES.
         }
 
         @Override
@@ -937,8 +898,7 @@ public class FloatingLineService extends Service {
 
                         detectedLineCount = 0;
                         detectedAngles = new float[0];
-                        detectedDx = new float[0];
-                        detectedDy = new float[0];
+                        detectedRhos = new float[0];
 
                         endX = startX + 250f;
                         endY = startY;
