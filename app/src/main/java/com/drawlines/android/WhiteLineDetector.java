@@ -15,58 +15,47 @@ public final class WhiteLineDetector {
     private static final float TABLE_TOP = 0.236f;
     private static final float TABLE_BOTTOM = 0.916f;
 
-    private static final int PIXEL_STEP = 2;
+    private static final int MIN_WHITE = 175;
+    private static final int MAX_COLOR_DIFFERENCE = 70;
 
+    private static final int START_DISTANCE = 22;
+    private static final int MAX_DISTANCE = 500;
+    private static final int DISTANCE_STEP = 3;
+
+    private static final int ANGLE_STEP = 1;
     private static final int MIN_VOTES = 5;
-
-    private static final float BALL_EXCLUSION_RADIUS = 18f;
+    private static final int RADIAL_BIN_SIZE = 8;
 
     private static final float LINE_TOLERANCE = 4.5f;
-
     private static final float MIN_ANGLE_DIFFERENCE = 12f;
-
-    private static final int RADIAL_BIN_SIZE = 8;
 
     private WhiteLineDetector() {
     }
 
-    public static class DetectedLine {
+    public static final class DetectedLine {
 
         public final float angle;
         public final float rho;
-        public final int votes;
 
-        public DetectedLine(float angle, float rho, int votes) {
+        public DetectedLine(float angle, float rho) {
             this.angle = angle;
             this.rho = rho;
-            this.votes = votes;
         }
     }
 
-    private static class WhitePoint {
+    private static final class Candidate {
 
-        final float dx;
-        final float dy;
+        float direction;
+        int votes;
 
-        WhitePoint(float dx, float dy) {
-            this.dx = dx;
-            this.dy = dy;
-        }
-    }
-
-    private static class Candidate {
-
-        final float angle;
-        final int votes;
-
-        Candidate(float angle, int votes) {
-            this.angle = angle;
+        Candidate(float direction, int votes) {
+            this.direction = direction;
             this.votes = votes;
         }
     }
 
     public static List<DetectedLine> detectLines(Image image) {
-        return new ArrayList<>();
+        return Collections.emptyList();
     }
 
     public static List<DetectedLine> detectLines(
@@ -76,200 +65,163 @@ public final class WhiteLineDetector {
 
         List<DetectedLine> result = new ArrayList<>();
 
-        if (image == null
-                || originX < 0
-                || originY < 0
-                || originX >= image.getWidth()
-                || originY >= image.getHeight()) {
-            return result;
-        }
-
-        Image.Plane[] planes = image.getPlanes();
-
-        if (planes == null || planes.length == 0) {
+        if (image == null || image.getPlanes() == null
+                || image.getPlanes().length == 0) {
             return result;
         }
 
         int width = image.getWidth();
         int height = image.getHeight();
 
-        int left = (int) (width * TABLE_LEFT);
-        int right = (int) (width * TABLE_RIGHT);
-        int top = (int) (height * TABLE_TOP);
-        int bottom = (int) (height * TABLE_BOTTOM);
-
-        if (originX < left || originX > right
-                || originY < top || originY > bottom) {
+        if (width <= 0 || height <= 0
+                || originX < 0 || originY < 0
+                || originX >= width || originY >= height) {
             return result;
         }
 
-        Image.Plane plane = planes[0];
+        Image.Plane plane = image.getPlanes()[0];
 
         ByteBuffer buffer = plane.getBuffer().duplicate();
 
         int rowStride = plane.getRowStride();
         int pixelStride = plane.getPixelStride();
 
-        int maxDistance = (int) Math.sqrt(
-                (right - left) * (right - left)
-                        + (bottom - top) * (bottom - top)
-        );
-
-        int radialBins =
-                maxDistance / RADIAL_BIN_SIZE + 2;
-
-        List<WhitePoint> points = new ArrayList<>();
-
-        // Recoge los píxeles blancos de la mesa.
-        for (int y = top; y < bottom; y += PIXEL_STEP) {
-
-            for (int x = left; x < right; x += PIXEL_STEP) {
-
-                if (!isWhite(
-                        buffer,
-                        x,
-                        y,
-                        width,
-                        height,
-                        rowStride,
-                        pixelStride)) {
-                    continue;
-                }
-
-                float dx = x - originX;
-                float dy = y - originY;
-
-                float distance = (float) Math.hypot(dx, dy);
-
-                // No utiliza los píxeles de la bola blanca.
-                if (distance <= BALL_EXCLUSION_RADIUS) {
-                    continue;
-                }
-
-                points.add(new WhitePoint(dx, dy));
-            }
-        }
-
-        if (points.size() < MIN_VOTES) {
+        if (pixelStride < 3 || rowStride <= 0) {
             return result;
         }
 
+        int maxDistance = Math.min(
+                MAX_DISTANCE,
+                Math.max(width, height)
+        );
+
         List<Candidate> candidates = new ArrayList<>();
 
-        // Busca direcciones que pasen directamente
-        // por el punto seleccionado.
-        for (int angle = 0; angle < 180; angle++) {
+        for (int angle = 0; angle < 360; angle += ANGLE_STEP) {
 
             double radians = Math.toRadians(angle);
 
-            float directionX = (float) Math.cos(radians);
-            float directionY = (float) Math.sin(radians);
+            float dx = (float) Math.cos(radians);
+            float dy = (float) Math.sin(radians);
 
-            boolean[] occupiedBins =
-                    new boolean[radialBins];
+            boolean[] radialBins =
+                    new boolean[maxDistance / RADIAL_BIN_SIZE + 2];
 
-            int occupiedCount = 0;
+            int votes = 0;
 
-            for (WhitePoint point : points) {
+            for (int distance = START_DISTANCE;
+                 distance <= maxDistance;
+                 distance += DISTANCE_STEP) {
 
-                float perpendicular = Math.abs(
-                        -point.dx * directionY
-                                + point.dy * directionX
-                );
+                float centerX = originX + dx * distance;
+                float centerY = originY + dy * distance;
 
-                if (perpendicular > LINE_TOLERANCE) {
-                    continue;
+                if (centerX < 0 || centerY < 0
+                        || centerX >= width || centerY >= height) {
+                    break;
                 }
 
-                float along = Math.abs(
-                        point.dx * directionX
-                                + point.dy * directionY
-                );
+                boolean foundWhite = false;
 
-                if (along <= BALL_EXCLUSION_RADIUS) {
-                    continue;
+                for (int offset = -4; offset <= 4; offset += 2) {
+
+                    int x = Math.round(centerX - dy * offset);
+                    int y = Math.round(centerY + dx * offset);
+
+                    if (x < 0 || y < 0
+                            || x >= width || y >= height) {
+                        continue;
+                    }
+
+                    if (isWhite(
+                            buffer,
+                            x,
+                            y,
+                            width,
+                            height,
+                            rowStride,
+                            pixelStride)) {
+
+                        foundWhite = true;
+                        break;
+                    }
                 }
 
-                int bin = (int) (along / RADIAL_BIN_SIZE);
+                if (foundWhite) {
 
-                if (bin >= 0 && bin < radialBins
-                        && !occupiedBins[bin]) {
+                    int bin = distance / RADIAL_BIN_SIZE;
 
-                    occupiedBins[bin] = true;
-                    occupiedCount++;
+                    if (bin >= 0 && bin < radialBins.length
+                            && !radialBins[bin]) {
+
+                        radialBins[bin] = true;
+                        votes++;
+                    }
                 }
             }
 
-            if (occupiedCount >= MIN_VOTES) {
-                candidates.add(
-                        new Candidate(angle, occupiedCount)
-                );
+            if (votes >= MIN_VOTES) {
+                candidates.add(new Candidate(angle, votes));
             }
         }
 
-        // Las direcciones con más tramos blancos
-        // tienen prioridad.
-        Collections.sort(
-                candidates,
-                new Comparator<Candidate>() {
-
-                    @Override
-                    public int compare(
-                            Candidate first,
-                            Candidate second) {
-
-                        return Integer.compare(
-                                second.votes,
-                                first.votes
-                        );
-                    }
-                }
+        candidates.sort(
+                (a, b) -> Integer.compare(b.votes, a.votes)
         );
 
-        // Selecciona como máximo dos direcciones distintas.
+        List<Candidate> selected = new ArrayList<>();
+
         for (Candidate candidate : candidates) {
 
-            boolean duplicate = false;
+            boolean different = true;
 
-            for (DetectedLine existing : result) {
+            for (Candidate previous : selected) {
 
-                if (angleDifference(
-                        candidate.angle,
-                        existing.angle
-                ) < MIN_ANGLE_DIFFERENCE) {
+                float difference = Math.abs(
+                        candidate.direction - previous.direction
+                );
 
-                    duplicate = true;
+                difference = Math.min(
+                        difference,
+                        360f - difference
+                );
+
+                // Una misma línea en sentido contrario
+                // no cuenta como una segunda trayectoria.
+                difference = Math.min(
+                        difference,
+                        Math.abs(180f - difference)
+                );
+
+                if (difference < MIN_ANGLE_DIFFERENCE) {
+                    different = false;
                     break;
                 }
             }
 
-            if (duplicate) {
-                continue;
+            if (different) {
+                selected.add(candidate);
             }
 
-            // Convierte la dirección de la línea
-            // al ángulo normal que utiliza FloatingLineService.
+            if (selected.size() == 2) {
+                break;
+            }
+        }
+
+        for (Candidate candidate : selected) {
+
+            // Convierte la dirección de la trayectoria
+            // al ángulo utilizado por FloatingLineService.
             float normalAngle =
-                    (candidate.angle - 90f + 180f) % 180f;
+                    (candidate.direction - 90f + 360f) % 180f;
 
             double theta = Math.toRadians(normalAngle);
 
-            float rho = (float) (
-                    originX * Math.cos(theta)
-                            + originY * Math.sin(theta)
-            );
+            float rho =
+                    originX * (float) Math.cos(theta)
+                    + originY * (float) Math.sin(theta);
 
-            result.add(
-                    new DetectedLine(
-                            normalAngle,
-                            rho,
-                            candidate.votes
-                    )
-            );
-
-            if (result.size() == 2) {
-                break;
-            }
+            result.add(new DetectedLine(normalAngle, rho));
         }
 
         return result;
@@ -287,16 +239,7 @@ public final class WhiteLineDetector {
             return null;
         }
 
-        return (lines.get(0).angle + 90f) % 180f;
-    }
-
-    private static float angleDifference(
-            float first,
-            float second) {
-
-        float difference = Math.abs(first - second);
-
-        return Math.min(difference, 180f - difference);
+        return lines.get(0).angle;
     }
 
     private static boolean isWhite(
@@ -308,34 +251,24 @@ public final class WhiteLineDetector {
             int rowStride,
             int pixelStride) {
 
-        if (x < 0 || y < 0
-                || x >= width || y >= height) {
+        if (x < 0 || y < 0 || x >= width || y >= height) {
             return false;
         }
 
-        int index = buffer.position()
-                + y * rowStride
-                + x * pixelStride;
+        int index = y * rowStride + x * pixelStride;
 
         if (index < 0 || index + 2 >= buffer.limit()) {
             return false;
         }
 
-        int red = buffer.get(index) & 0xFF;
-        int green = buffer.get(index + 1) & 0xFF;
-        int blue = buffer.get(index + 2) & 0xFF;
+        int c1 = buffer.get(index) & 0xFF;
+        int c2 = buffer.get(index + 1) & 0xFF;
+        int c3 = buffer.get(index + 2) & 0xFF;
 
-        int minimum = Math.min(
-                red,
-                Math.min(green, blue)
-        );
+        int minimum = Math.min(c1, Math.min(c2, c3));
+        int maximum = Math.max(c1, Math.max(c2, c3));
 
-        int maximum = Math.max(
-                red,
-                Math.max(green, blue)
-        );
-
-        return minimum >= 175
-                && maximum - minimum <= 70;
+        return minimum >= MIN_WHITE
+                && maximum - minimum <= MAX_COLOR_DIFFERENCE;
     }
 }
