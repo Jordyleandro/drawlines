@@ -43,22 +43,24 @@ public class FloatingLineService extends Service {
     private static final String PREF_Y = "origin_y";
     private static final String PREF_SELECTED = "origin_selected";
     private static final String PREF_TRACKING = "tracking_enabled";
+    private static final String PREF_VIEW_WIDTH = "view_width";
+    private static final String PREF_VIEW_HEIGHT = "view_height";
 
     private boolean trackingEnabled = false;
     private boolean receiverRegistered = false;
 
     private final BroadcastReceiver directionReceiver =
             new BroadcastReceiver() {
+
         @Override
         public void onReceive(Context context, Intent intent) {
 
-            if (!trackingEnabled || lineView == null) {
+            if (!trackingEnabled || lineView == null || intent == null) {
                 return;
             }
 
-            if (intent == null ||
-                    !ScreenCaptureService.ACTION_DIRECTION.equals(
-                            intent.getAction())) {
+            if (!ScreenCaptureService.ACTION_DIRECTION.equals(
+                    intent.getAction())) {
                 return;
             }
 
@@ -99,6 +101,7 @@ public class FloatingLineService extends Service {
         String channelId = "drawlines_channel";
 
         if (Build.VERSION.SDK_INT >= 26) {
+
             NotificationChannel channel =
                     new NotificationChannel(
                             channelId,
@@ -122,6 +125,7 @@ public class FloatingLineService extends Service {
                 .setContentTitle("DrawLines activo")
                 .setContentText("Guía de trayectoria")
                 .setSmallIcon(android.R.drawable.ic_menu_edit)
+                .setOngoing(true)
                 .build();
 
         startForeground(1, notification);
@@ -254,10 +258,7 @@ public class FloatingLineService extends Service {
                 v -> toggleTracking()
         );
 
-        windowManager.addView(
-                trackingButton,
-                trackingParams
-        );
+        windowManager.addView(trackingButton, trackingParams);
 
         hideButton = createButton("OCULTAR");
 
@@ -286,12 +287,15 @@ public class FloatingLineService extends Service {
         );
 
         if (Build.VERSION.SDK_INT >= 33) {
+
             registerReceiver(
                     directionReceiver,
                     filter,
                     Context.RECEIVER_NOT_EXPORTED
             );
+
         } else {
+
             registerReceiver(directionReceiver, filter);
         }
 
@@ -300,10 +304,23 @@ public class FloatingLineService extends Service {
 
     private void toggleTracking() {
 
+        SharedPreferences preferences =
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
+        if (!lineView.hasSelectedPoint()) {
+            trackingEnabled = false;
+
+            preferences.edit()
+                    .putBoolean(PREF_TRACKING, false)
+                    .apply();
+
+            trackingButton.setText("SELECCIONA PRIMERO EL PUNTO");
+            return;
+        }
+
         trackingEnabled = !trackingEnabled;
 
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .edit()
+        preferences.edit()
                 .putBoolean(PREF_TRACKING, trackingEnabled)
                 .apply();
 
@@ -459,6 +476,37 @@ public class FloatingLineService extends Service {
             pointPaint.setStyle(Paint.Style.FILL);
 
             setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+
+            restoreSelectedPoint();
+        }
+
+        private void restoreSelectedPoint() {
+
+            SharedPreferences preferences =
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+
+            pointSelected = preferences.getBoolean(
+                    PREF_SELECTED,
+                    false
+            );
+
+            if (pointSelected) {
+
+                startX = preferences.getFloat(PREF_X, 600f);
+                startY = preferences.getFloat(PREF_Y, 450f);
+
+                endX = startX + 250f;
+                endY = startY;
+
+                post(() -> {
+                    updateCoordinates(startX, startY);
+                    invalidate();
+                });
+            }
+        }
+
+        boolean hasSelectedPoint() {
+            return pointSelected;
         }
 
         void setTouchMode(int mode) {
@@ -614,7 +662,7 @@ public class FloatingLineService extends Service {
                         startX = x;
                         startY = y;
 
-                        endX = x + 250;
+                        endX = x + 250f;
                         endY = y;
 
                         pointSelected = true;
@@ -628,6 +676,8 @@ public class FloatingLineService extends Service {
                         preferences.edit()
                                 .putFloat(PREF_X, startX)
                                 .putFloat(PREF_Y, startY)
+                                .putInt(PREF_VIEW_WIDTH, getWidth())
+                                .putInt(PREF_VIEW_HEIGHT, getHeight())
                                 .putBoolean(PREF_SELECTED, true)
                                 .apply();
 
@@ -637,8 +687,7 @@ public class FloatingLineService extends Service {
                         return true;
                     }
 
-                    if (touchMode == MODE_ADJUST
-                            && pointSelected) {
+                    if (touchMode == MODE_ADJUST && pointSelected) {
 
                         endX = x;
                         endY = y;
@@ -651,8 +700,7 @@ public class FloatingLineService extends Service {
 
                 case MotionEvent.ACTION_MOVE:
 
-                    if (touchMode == MODE_ADJUST
-                            && pointSelected) {
+                    if (touchMode == MODE_ADJUST && pointSelected) {
 
                         endX = x;
                         endY = y;
