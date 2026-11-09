@@ -527,6 +527,9 @@ public class FloatingLineService extends Service {
         private float[] ballRadii = new float[0];
 
         private float[] detectedAngles = new float[0];
+        private float[] detectedDx = new float[0];
+        private float[] detectedDy = new float[0];
+
         private int detectedLineCount = 0;
 
         LineView() {
@@ -584,7 +587,10 @@ public class FloatingLineService extends Service {
                 return;
             }
 
-            int count = Math.min(xs.length, Math.min(ys.length, radii.length));
+            int count = Math.min(
+                    xs.length,
+                    Math.min(ys.length, radii.length)
+            );
 
             float width = getWidth();
             float height = getHeight();
@@ -602,6 +608,8 @@ public class FloatingLineService extends Service {
                 ballYs[i] = ys[i] * height;
                 ballRadii[i] = radii[i] * width;
             }
+
+            invalidate();
         }
 
         void updateDetectedLines(
@@ -616,7 +624,10 @@ public class FloatingLineService extends Service {
                 return;
             }
 
-            int count = Math.min(2, Math.min(angles.length, rhos.length));
+            int count = Math.min(
+                    2,
+                    Math.min(angles.length, rhos.length)
+            );
 
             if (count == 0) {
                 return;
@@ -629,8 +640,14 @@ public class FloatingLineService extends Service {
                 return;
             }
 
-            float originX = startX * imageWidth / viewWidth;
-            float originY = startY * imageHeight / viewHeight;
+            // Escalas independientes de la captura al panel.
+            float scaleX = viewWidth / imageWidth;
+            float scaleY = viewHeight / imageHeight;
+
+            // Convierte el punto seleccionado a coordenadas
+            // de la imagen capturada.
+            float originX = startX / scaleX;
+            float originY = startY / scaleY;
 
             float left = imageWidth * 0.195f;
             float right = imageWidth * 0.805f;
@@ -638,48 +655,96 @@ public class FloatingLineService extends Service {
             float bottom = imageHeight * 0.916f;
 
             float[] newAngles = new float[count];
+            float[] newDx = new float[count];
+            float[] newDy = new float[count];
+
             int validCount = 0;
 
             for (int i = 0; i < count; i++) {
 
                 double theta = Math.toRadians(angles[i]);
 
-                float dx = (float) -Math.sin(theta);
-                float dy = (float) Math.cos(theta);
+                // Dirección original en coordenadas de captura.
+                float imageDx = (float) -Math.sin(theta);
+                float imageDy = (float) Math.cos(theta);
 
+                // Conversión de dirección a coordenadas del panel.
+                float dx = imageDx * scaleX;
+                float dy = imageDy * scaleY;
+
+                float length = (float) Math.hypot(dx, dy);
+
+                if (length < 0.0001f) {
+                    continue;
+                }
+
+                dx /= length;
+                dy /= length;
+
+                // Comprueba que la trayectoria atraviese la mesa.
                 float tMin = Float.NEGATIVE_INFINITY;
                 float tMax = Float.POSITIVE_INFINITY;
 
-                if (Math.abs(dx) < 0.00001f) {
-                    if (originX < left || originX > right) continue;
+                if (Math.abs(imageDx) < 0.00001f) {
+                    if (originX < left || originX > right) {
+                        continue;
+                    }
                 } else {
-                    float t1 = (left - originX) / dx;
-                    float t2 = (right - originX) / dx;
+                    float t1 = (left - originX) / imageDx;
+                    float t2 = (right - originX) / imageDx;
+
                     tMin = Math.max(tMin, Math.min(t1, t2));
                     tMax = Math.min(tMax, Math.max(t1, t2));
                 }
 
-                if (Math.abs(dy) < 0.00001f) {
-                    if (originY < top || originY > bottom) continue;
+                if (Math.abs(imageDy) < 0.00001f) {
+                    if (originY < top || originY > bottom) {
+                        continue;
+                    }
                 } else {
-                    float t1 = (top - originY) / dy;
-                    float t2 = (bottom - originY) / dy;
+                    float t1 = (top - originY) / imageDy;
+                    float t2 = (bottom - originY) / imageDy;
+
                     tMin = Math.max(tMin, Math.min(t1, t2));
                     tMax = Math.min(tMax, Math.max(t1, t2));
                 }
 
-                if (tMin >= tMax) continue;
+                if (tMin >= tMax) {
+                    continue;
+                }
 
                 newAngles[validCount] = angles[i];
+                newDx[validCount] = dx;
+                newDy[validCount] = dy;
+
                 validCount++;
             }
 
-            if (validCount > 0) {
-                detectedAngles = new float[validCount];
-                System.arraycopy(newAngles, 0, detectedAngles, 0, validCount);
-                detectedLineCount = validCount;
-                invalidate();
-            }
+            detectedAngles = new float[validCount];
+            detectedDx = new float[validCount];
+            detectedDy = new float[validCount];
+
+            System.arraycopy(
+                    newAngles, 0,
+                    detectedAngles, 0,
+                    validCount
+            );
+
+            System.arraycopy(
+                    newDx, 0,
+                    detectedDx, 0,
+                    validCount
+            );
+
+            System.arraycopy(
+                    newDy, 0,
+                    detectedDy, 0,
+                    validCount
+            );
+
+            detectedLineCount = validCount;
+
+            invalidate();
         }
 
         private void drawDetectedLines(Canvas canvas) {
@@ -694,38 +759,46 @@ public class FloatingLineService extends Service {
 
             for (int i = 0; i < detectedLineCount; i++) {
 
-                double angle = Math.toRadians(detectedAngles[i]);
-
-                float dx = (float) -Math.sin(angle);
-                float dy = (float) Math.cos(angle);
-
-                float x = startX;
-                float y = startY;
+                float dx = detectedDx[i];
+                float dy = detectedDy[i];
 
                 float tMin = Float.NEGATIVE_INFINITY;
                 float tMax = Float.POSITIVE_INFINITY;
 
-                if (Math.abs(dx) > 0.00001f) {
-                    float t1 = (left - x) / dx;
-                    float t2 = (right - x) / dx;
+                if (Math.abs(dx) < 0.00001f) {
+                    if (startX < left || startX > right) {
+                        continue;
+                    }
+                } else {
+                    float t1 = (left - startX) / dx;
+                    float t2 = (right - startX) / dx;
+
                     tMin = Math.max(tMin, Math.min(t1, t2));
                     tMax = Math.min(tMax, Math.max(t1, t2));
                 }
 
-                if (Math.abs(dy) > 0.00001f) {
-                    float t1 = (top - y) / dy;
-                    float t2 = (bottom - y) / dy;
+                if (Math.abs(dy) < 0.00001f) {
+                    if (startY < top || startY > bottom) {
+                        continue;
+                    }
+                } else {
+                    float t1 = (top - startY) / dy;
+                    float t2 = (bottom - startY) / dy;
+
                     tMin = Math.max(tMin, Math.min(t1, t2));
                     tMax = Math.min(tMax, Math.max(t1, t2));
                 }
 
-                if (tMin >= tMax) continue;
+                if (tMin >= tMax) {
+                    continue;
+                }
 
+                // Cada trayectoria pasa exactamente por el origen.
                 canvas.drawLine(
-                        x + dx * tMin,
-                        y + dy * tMin,
-                        x + dx * tMax,
-                        y + dy * tMax,
+                        startX + dx * tMin,
+                        startY + dy * tMin,
+                        startX + dx * tMax,
+                        startY + dy * tMax,
                         linePaint
                 );
             }
@@ -733,7 +806,7 @@ public class FloatingLineService extends Service {
 
         void updateAutomaticDirection(float angle) {
             // Se conserva por compatibilidad.
-            // Las dos líneas nuevas se dibujan desde ACTION_LINES.
+            // Las líneas se reciben mediante ACTION_LINES.
         }
 
         @Override
@@ -758,7 +831,9 @@ public class FloatingLineService extends Service {
             float width = getWidth();
             float height = getHeight();
 
-            if (width <= 0 || height <= 0) return;
+            if (width <= 0 || height <= 0) {
+                return;
+            }
 
             float left = width * 0.195f;
             float right = width * 0.805f;
@@ -770,7 +845,9 @@ public class FloatingLineService extends Service {
 
             float length = (float) Math.hypot(dx, dy);
 
-            if (length < 1f) return;
+            if (length < 1f) {
+                return;
+            }
 
             dx /= length;
             dy /= length;
@@ -783,20 +860,32 @@ public class FloatingLineService extends Service {
                 float tx = Float.POSITIVE_INFINITY;
                 float ty = Float.POSITIVE_INFINITY;
 
-                if (dx > 0.00001f) tx = (right - x) / dx;
-                else if (dx < -0.00001f) tx = (left - x) / dx;
+                if (dx > 0.00001f) {
+                    tx = (right - x) / dx;
+                } else if (dx < -0.00001f) {
+                    tx = (left - x) / dx;
+                }
 
-                if (dy > 0.00001f) ty = (bottom - y) / dy;
-                else if (dy < -0.00001f) ty = (top - y) / dy;
+                if (dy > 0.00001f) {
+                    ty = (bottom - y) / dy;
+                } else if (dy < -0.00001f) {
+                    ty = (top - y) / dy;
+                }
 
                 float distance = Math.min(tx, ty);
 
-                if (!Float.isFinite(distance) || distance <= 0) break;
+                if (!Float.isFinite(distance) || distance <= 0) {
+                    break;
+                }
 
                 float nextX = x + dx * distance;
                 float nextY = y + dy * distance;
 
-                canvas.drawLine(x, y, nextX, nextY, linePaint);
+                canvas.drawLine(
+                        x, y,
+                        nextX, nextY,
+                        linePaint
+                );
 
                 boolean hitX = Math.abs(tx - distance) < 0.01f;
                 boolean hitY = Math.abs(ty - distance) < 0.01f;
@@ -804,18 +893,30 @@ public class FloatingLineService extends Service {
                 x = nextX;
                 y = nextY;
 
-                if (hitX) dx = -dx;
-                if (hitY) dy = -dy;
+                if (hitX) {
+                    dx = -dx;
+                }
 
-                if (hitX) x += dx * 0.1f;
-                if (hitY) y += dy * 0.1f;
+                if (hitY) {
+                    dy = -dy;
+                }
+
+                if (hitX) {
+                    x += dx * 0.1f;
+                }
+
+                if (hitY) {
+                    y += dy * 0.1f;
+                }
             }
         }
 
         @Override
         public boolean onTouchEvent(MotionEvent event) {
 
-            if (touchMode == MODE_IDLE) return false;
+            if (touchMode == MODE_IDLE) {
+                return false;
+            }
 
             float x = event.getX();
             float y = event.getY();
@@ -831,6 +932,8 @@ public class FloatingLineService extends Service {
 
                         detectedLineCount = 0;
                         detectedAngles = new float[0];
+                        detectedDx = new float[0];
+                        detectedDy = new float[0];
 
                         endX = startX + 250f;
                         endY = startY;
