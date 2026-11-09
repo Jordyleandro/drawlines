@@ -37,16 +37,32 @@ public class ScreenCaptureService extends Service {
 
     public static final String EXTRA_ANGLE = "detected_angle";
 
-    // Nuevo: resultados de detección de bolas.
+    // Transmisión de las dos líneas blancas.
+    public static final String ACTION_LINES =
+            "com.drawlines.android.LINES_DETECTED";
+
+    public static final String EXTRA_LINE_ANGLES =
+            "detected_line_angles";
+
+    public static final String EXTRA_LINE_RHOS =
+            "detected_line_rhos";
+
+    public static final String EXTRA_LINE_COUNT =
+            "detected_line_count";
+
+    public static final String EXTRA_IMAGE_WIDTH =
+            "detected_image_width";
+
+    public static final String EXTRA_IMAGE_HEIGHT =
+            "detected_image_height";
+
+    // Detección de bolas, conservada por compatibilidad.
     public static final String ACTION_BALLS =
             "com.drawlines.android.BALLS_DETECTED";
 
     public static final String EXTRA_BALL_XS = "ball_positions_x";
     public static final String EXTRA_BALL_YS = "ball_positions_y";
     public static final String EXTRA_BALL_RADII = "ball_radii";
-
-    // Las posiciones de las bolas se envían normalizadas
-    // entre 0 y 1 respecto de la captura.
     public static final String EXTRA_BALL_COUNT = "ball_count";
 
     private static final int NOTIFICATION_ID = 92;
@@ -305,14 +321,13 @@ public class ScreenCaptureService extends Service {
                 return;
             }
 
-            // 1. Detectar las bolas en cada captura.
+            // Se conserva la detección anterior de bolas.
             detectAndBroadcastBalls(
                     image,
                     imageWidth,
                     imageHeight
             );
 
-            // 2. Mantener la detección de dirección original.
             boolean trackingEnabled = preferences.getBoolean(
                     PREF_TRACKING,
                     false
@@ -322,6 +337,14 @@ public class ScreenCaptureService extends Service {
                 return;
             }
 
+            // Nueva detección de hasta dos líneas blancas.
+            detectAndBroadcastLines(
+                    image,
+                    imageWidth,
+                    imageHeight
+            );
+
+            // Se conserva también el sistema anterior de dirección.
             boolean selected = preferences.getBoolean(
                     PREF_SELECTED,
                     false
@@ -358,8 +381,6 @@ public class ScreenCaptureService extends Service {
                 return;
             }
 
-            // Convertir las coordenadas de la ventana
-            // flotante a las dimensiones de la captura.
             float scaleX = (float) imageWidth / savedWidth;
             float scaleY = (float) imageHeight / savedHeight;
 
@@ -403,6 +424,52 @@ public class ScreenCaptureService extends Service {
         }
     }
 
+    private void detectAndBroadcastLines(
+            Image image,
+            int imageWidth,
+            int imageHeight) {
+
+        try {
+
+            List<WhiteLineDetector.DetectedLine> lines =
+                    WhiteLineDetector.detectLines(image);
+
+            int count = Math.min(lines.size(), 2);
+
+            float[] angles = new float[count];
+            float[] rhos = new float[count];
+
+            for (int i = 0; i < count; i++) {
+
+                WhiteLineDetector.DetectedLine line = lines.get(i);
+
+                angles[i] = line.angle;
+                rhos[i] = line.rho;
+            }
+
+            Intent result = new Intent(ACTION_LINES);
+
+            result.setPackage(getPackageName());
+
+            result.putExtra(EXTRA_LINE_ANGLES, angles);
+            result.putExtra(EXTRA_LINE_RHOS, rhos);
+            result.putExtra(EXTRA_LINE_COUNT, count);
+
+            result.putExtra(EXTRA_IMAGE_WIDTH, imageWidth);
+            result.putExtra(EXTRA_IMAGE_HEIGHT, imageHeight);
+
+            sendBroadcast(result);
+
+        } catch (Exception e) {
+
+            Log.e(
+                    "DrawLines",
+                    "Error detectando las dos líneas",
+                    e
+            );
+        }
+    }
+
     private void detectAndBroadcastBalls(
             Image image,
             int imageWidth,
@@ -419,8 +486,6 @@ public class ScreenCaptureService extends Service {
 
             for (BallDetector.Ball ball : balls) {
 
-                // Normalizar para que las posiciones
-                // puedan adaptarse al tamaño del overlay.
                 positionsX.add(ball.x / imageWidth);
                 positionsY.add(ball.y / imageHeight);
                 radii.add(ball.radius / imageWidth);
