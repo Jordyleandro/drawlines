@@ -37,7 +37,6 @@ public class ScreenCaptureService extends Service {
 
     public static final String EXTRA_ANGLE = "detected_angle";
 
-    // Transmisión de las dos líneas blancas.
     public static final String ACTION_LINES =
             "com.drawlines.android.LINES_DETECTED";
 
@@ -56,7 +55,6 @@ public class ScreenCaptureService extends Service {
     public static final String EXTRA_IMAGE_HEIGHT =
             "detected_image_height";
 
-    // Detección de bolas, conservada por compatibilidad.
     public static final String ACTION_BALLS =
             "com.drawlines.android.BALLS_DETECTED";
 
@@ -321,7 +319,7 @@ public class ScreenCaptureService extends Service {
                 return;
             }
 
-            // Se conserva la detección anterior de bolas.
+            // Se conserva la detección de bolas.
             detectAndBroadcastBalls(
                     image,
                     imageWidth,
@@ -333,18 +331,14 @@ public class ScreenCaptureService extends Service {
                     false
             );
 
+            // Si el seguimiento está apagado,
+            // no modifica las últimas líneas dibujadas.
             if (!trackingEnabled) {
                 return;
             }
 
-            // Nueva detección de hasta dos líneas blancas.
-            detectAndBroadcastLines(
-                    image,
-                    imageWidth,
-                    imageHeight
-            );
-
-            // Se conserva también el sistema anterior de dirección.
+            // No se detecta ninguna línea hasta que
+            // el usuario haya seleccionado un punto.
             boolean selected = preferences.getBoolean(
                     PREF_SELECTED,
                     false
@@ -381,16 +375,32 @@ public class ScreenCaptureService extends Service {
                 return;
             }
 
+            // Convierte el punto del panel a coordenadas
+            // de la imagen capturada.
             float scaleX = (float) imageWidth / savedWidth;
             float scaleY = (float) imageHeight / savedHeight;
 
             float originX = savedX * scaleX;
             float originY = savedY * scaleY;
 
-            if (originX >= imageWidth || originY >= imageHeight) {
+            if (originX < 0
+                    || originY < 0
+                    || originX >= imageWidth
+                    || originY >= imageHeight) {
                 return;
             }
 
+            // Busca las líneas únicamente alrededor
+            // del punto seleccionado por el usuario.
+            detectAndBroadcastLines(
+                    image,
+                    imageWidth,
+                    imageHeight,
+                    originX,
+                    originY
+            );
+
+            // Se conserva la transmisión de dirección anterior.
             Float angle = WhiteLineDetector.detectAngle(
                     image,
                     originX,
@@ -427,12 +437,18 @@ public class ScreenCaptureService extends Service {
     private void detectAndBroadcastLines(
             Image image,
             int imageWidth,
-            int imageHeight) {
+            int imageHeight,
+            float originX,
+            float originY) {
 
         try {
 
             List<WhiteLineDetector.DetectedLine> lines =
-                    WhiteLineDetector.detectLines(image);
+                    WhiteLineDetector.detectLines(
+                            image,
+                            originX,
+                            originY
+                    );
 
             int count = Math.min(lines.size(), 2);
 
@@ -464,7 +480,7 @@ public class ScreenCaptureService extends Service {
 
             Log.e(
                     "DrawLines",
-                    "Error detectando las dos líneas",
+                    "Error detectando líneas desde el punto seleccionado",
                     e
             );
         }
