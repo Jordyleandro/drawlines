@@ -5,7 +5,6 @@ import android.media.Image;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 
 public final class WhiteLineDetector {
@@ -19,7 +18,6 @@ public final class WhiteLineDetector {
     private static final int MAX_COLOR_DIFFERENCE = 70;
 
     private static final int START_DISTANCE = 22;
-    private static final int MAX_DISTANCE = 500;
     private static final int DISTANCE_STEP = 3;
 
     private static final int ANGLE_STEP = 1;
@@ -90,10 +88,9 @@ public final class WhiteLineDetector {
             return result;
         }
 
-        int maxDistance = Math.min(
-                MAX_DISTANCE,
-                Math.max(width, height)
-        );
+        // Busca hasta los límites de la captura,
+        // sin el antiguo límite de 500 píxeles.
+        int maxDistance = Math.max(width, height);
 
         List<Candidate> candidates = new ArrayList<>();
 
@@ -186,8 +183,6 @@ public final class WhiteLineDetector {
                         360f - difference
                 );
 
-                // Una misma línea en sentido contrario
-                // no cuenta como una segunda trayectoria.
                 difference = Math.min(
                         difference,
                         Math.abs(180f - difference)
@@ -210,8 +205,6 @@ public final class WhiteLineDetector {
 
         for (Candidate candidate : selected) {
 
-            // Convierte la dirección de la trayectoria
-            // al ángulo utilizado por FloatingLineService.
             float normalAngle =
                     (candidate.direction - 90f + 360f) % 180f;
 
