@@ -16,23 +16,22 @@ public final class WhiteLineDetector {
     private static final float TABLE_BOTTOM = 0.916f;
 
     private static final int PIXEL_STEP = 2;
-    private static final int ANGLE_STEP = 2;
-    private static final int RHO_STEP = 2;
 
-    private static final int MIN_VOTES = 10;
+    private static final int MIN_VOTES = 5;
 
-    // Tolerancia para que una línea pase por el punto seleccionado.
-    private static final float ORIGIN_TOLERANCE = 10f;
+    private static final float BALL_EXCLUSION_RADIUS = 18f;
 
-    // Excluye la propia bola blanca del cálculo de las líneas.
-    private static final float BALL_EXCLUSION_RADIUS = 13f;
+    private static final float LINE_TOLERANCE = 4.5f;
 
     private static final float MIN_ANGLE_DIFFERENCE = 12f;
+
+    private static final int RADIAL_BIN_SIZE = 8;
 
     private WhiteLineDetector() {
     }
 
     public static class DetectedLine {
+
         public final float angle;
         public final float rho;
         public final int votes;
@@ -45,22 +44,31 @@ public final class WhiteLineDetector {
     }
 
     private static class WhitePoint {
-        final int x;
-        final int y;
 
-        WhitePoint(int x, int y) {
-            this.x = x;
-            this.y = y;
+        final float dx;
+        final float dy;
+
+        WhitePoint(float dx, float dy) {
+            this.dx = dx;
+            this.dy = dy;
         }
     }
 
-    // Compatibilidad temporal con la llamada antigua.
-    // No busca líneas sin una coordenada seleccionada.
+    private static class Candidate {
+
+        final float angle;
+        final int votes;
+
+        Candidate(float angle, int votes) {
+            this.angle = angle;
+            this.votes = votes;
+        }
+    }
+
     public static List<DetectedLine> detectLines(Image image) {
         return new ArrayList<>();
     }
 
-    // Nuevo detector: utiliza obligatoriamente el punto seleccionado.
     public static List<DetectedLine> detectLines(
             Image image,
             float originX,
@@ -96,15 +104,25 @@ public final class WhiteLineDetector {
         }
 
         Image.Plane plane = planes[0];
+
         ByteBuffer buffer = plane.getBuffer().duplicate();
 
         int rowStride = plane.getRowStride();
         int pixelStride = plane.getPixelStride();
 
+        int maxDistance = (int) Math.sqrt(
+                (right - left) * (right - left)
+                        + (bottom - top) * (bottom - top)
+        );
+
+        int radialBins =
+                maxDistance / RADIAL_BIN_SIZE + 2;
+
         List<WhitePoint> points = new ArrayList<>();
 
-        // Solo recoge píxeles blancos dentro de la mesa.
+        // Recoge los píxeles blancos de la mesa.
         for (int y = top; y < bottom; y += PIXEL_STEP) {
+
             for (int x = left; x < right; x += PIXEL_STEP) {
 
                 if (!isWhite(
@@ -121,14 +139,14 @@ public final class WhiteLineDetector {
                 float dx = x - originX;
                 float dy = y - originY;
 
-                // Ignora los píxeles de la propia bola blanca.
-                if (dx * dx + dy * dy
-                        <= BALL_EXCLUSION_RADIUS
-                        * BALL_EXCLUSION_RADIUS) {
+                float distance = (float) Math.hypot(dx, dy);
+
+                // No utiliza los píxeles de la bola blanca.
+                if (distance <= BALL_EXCLUSION_RADIUS) {
                     continue;
                 }
 
-                points.add(new WhitePoint(x, y));
+                points.add(new WhitePoint(dx, dy));
             }
         }
 
@@ -136,108 +154,69 @@ public final class WhiteLineDetector {
             return result;
         }
 
-        int diagonal = (int) Math.sqrt(
-                (right - left) * (right - left)
-                        + (bottom - top) * (bottom - top)
-        );
+        List<Candidate> candidates = new ArrayList<>();
 
-        int angleCount = 180 / ANGLE_STEP;
-        int rhoCount = (diagonal * 2) / RHO_STEP + 1;
+        // Busca direcciones que pasen directamente
+        // por el punto seleccionado.
+        for (int angle = 0; angle < 180; angle++) {
 
-        int[][] accumulator =
-                new int[angleCount][rhoCount];
+            double radians = Math.toRadians(angle);
 
-        // Acumula líneas blancas de la imagen.
-        for (WhitePoint point : points) {
+            float directionX = (float) Math.cos(radians);
+            float directionY = (float) Math.sin(radians);
 
-            for (int a = 0; a < angleCount; a++) {
+            boolean[] occupiedBins =
+                    new boolean[radialBins];
 
-                double theta = Math.toRadians(a * ANGLE_STEP);
+            int occupiedCount = 0;
 
-                double rho =
-                        point.x * Math.cos(theta)
-                                + point.y * Math.sin(theta);
+            for (WhitePoint point : points) {
 
-                int rhoIndex = (int) Math.round(
-                        (rho + diagonal) / RHO_STEP
+                float perpendicular = Math.abs(
+                        -point.dx * directionY
+                                + point.dy * directionX
                 );
 
-                if (rhoIndex >= 0 && rhoIndex < rhoCount) {
-                    accumulator[a][rhoIndex]++;
-                }
-            }
-        }
-
-        List<DetectedLine> candidates =
-                new ArrayList<>();
-
-        // Solo acepta líneas que pasan cerca
-        // de la coordenada que seleccionó el usuario.
-        for (int a = 0; a < angleCount; a++) {
-
-            for (int r = 2; r < rhoCount - 2; r++) {
-
-                int votes = accumulator[a][r];
-
-                if (votes < MIN_VOTES) {
+                if (perpendicular > LINE_TOLERANCE) {
                     continue;
                 }
 
-                float angle = a * ANGLE_STEP;
-                float rho = r * RHO_STEP - diagonal;
-
-                double theta = Math.toRadians(angle);
-
-                float distance = Math.abs(
-                        originX * (float) Math.cos(theta)
-                                + originY * (float) Math.sin(theta)
-                                - rho
+                float along = Math.abs(
+                        point.dx * directionX
+                                + point.dy * directionY
                 );
 
-                if (distance > ORIGIN_TOLERANCE) {
+                if (along <= BALL_EXCLUSION_RADIUS) {
                     continue;
                 }
 
-                boolean maximum = true;
+                int bin = (int) (along / RADIAL_BIN_SIZE);
 
-                for (int da = -1; da <= 1 && maximum; da++) {
+                if (bin >= 0 && bin < radialBins
+                        && !occupiedBins[bin]) {
 
-                    for (int dr = -2; dr <= 2; dr++) {
-
-                        if (da == 0 && dr == 0) {
-                            continue;
-                        }
-
-                        int neighborAngle = a + da;
-
-                        if (neighborAngle < 0
-                                || neighborAngle >= angleCount) {
-                            continue;
-                        }
-
-                        if (accumulator[neighborAngle][r + dr]
-                                > votes) {
-                            maximum = false;
-                            break;
-                        }
-                    }
+                    occupiedBins[bin] = true;
+                    occupiedCount++;
                 }
+            }
 
-                if (maximum) {
-                    candidates.add(
-                            new DetectedLine(angle, rho, votes)
-                    );
-                }
+            if (occupiedCount >= MIN_VOTES) {
+                candidates.add(
+                        new Candidate(angle, occupiedCount)
+                );
             }
         }
 
+        // Las direcciones con más tramos blancos
+        // tienen prioridad.
         Collections.sort(
                 candidates,
-                new Comparator<DetectedLine>() {
+                new Comparator<Candidate>() {
+
                     @Override
                     public int compare(
-                            DetectedLine first,
-                            DetectedLine second) {
+                            Candidate first,
+                            Candidate second) {
 
                         return Integer.compare(
                                 second.votes,
@@ -247,8 +226,8 @@ public final class WhiteLineDetector {
                 }
         );
 
-        // Conserva como máximo dos direcciones diferentes.
-        for (DetectedLine candidate : candidates) {
+        // Selecciona como máximo dos direcciones distintas.
+        for (Candidate candidate : candidates) {
 
             boolean duplicate = false;
 
@@ -258,16 +237,37 @@ public final class WhiteLineDetector {
                         candidate.angle,
                         existing.angle
                 ) < MIN_ANGLE_DIFFERENCE) {
+
                     duplicate = true;
                     break;
                 }
             }
 
-            if (!duplicate) {
-                result.add(candidate);
+            if (duplicate) {
+                continue;
             }
 
-            if (result.size() >= 2) {
+            // Convierte la dirección de la línea
+            // al ángulo normal que utiliza FloatingLineService.
+            float normalAngle =
+                    (candidate.angle - 90f + 180f) % 180f;
+
+            double theta = Math.toRadians(normalAngle);
+
+            float rho = (float) (
+                    originX * Math.cos(theta)
+                            + originY * Math.sin(theta)
+            );
+
+            result.add(
+                    new DetectedLine(
+                            normalAngle,
+                            rho,
+                            candidate.votes
+                    )
+            );
+
+            if (result.size() == 2) {
                 break;
             }
         }
@@ -313,7 +313,9 @@ public final class WhiteLineDetector {
             return false;
         }
 
-        int index = y * rowStride + x * pixelStride;
+        int index = buffer.position()
+                + y * rowStride
+                + x * pixelStride;
 
         if (index < 0 || index + 2 >= buffer.limit()) {
             return false;
@@ -333,7 +335,7 @@ public final class WhiteLineDetector {
                 Math.max(green, blue)
         );
 
-        return minimum >= 190
-                && maximum - minimum <= 55;
+        return minimum >= 175
+                && maximum - minimum <= 70;
     }
 }
